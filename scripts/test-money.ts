@@ -6,7 +6,7 @@
 
 import { sql } from "../src/db";
 import { createUser } from "../src/auth";
-import { parseAmount, formatCents } from "../src/money";
+import { MoneyError, parseAmount, formatCents, sendMoney } from "../src/money";
 
 const origin = `http://localhost:${process.env.PORT ?? 3000}`;
 const stamp = Date.now() % 1e8;
@@ -298,6 +298,22 @@ try {
 	check("quick picks leave out accounts that blocked you", !bSend.includes(`data-handle="${c}"`), bSend.match(/data-handle="[^"]+"/g));
 	await sql`delete from blocks where blocker_id = ${ids[2]}::bigint and blocked_id = ${ids[1]}::bigint`;
 	check("odd input lists nothing", (await people("%_")).length === 0 && (await people("")).length === 0);
+
+	// ---- money stays on this instance
+	const elsewhere = await sa.send({ to: "@someone@other.example", amount: "1" });
+	check("money can't go to an account on another instance", elsewhere.status === 400 && (await elsewhere.text()).includes("stays on this instance"));
+	check("nor be asked of one", (await sb.form("/account/money/request", { from: "someone@other.example", amount: "1", note: "" })).status === 400);
+	const remoteId = await createUser(`m${stamp}r`, "Remote copy", "testpass123");
+	ids.push(remoteId);
+	await sql`update users set instance = 'other.example' where id = ${remoteId}::bigint`;
+	check("an account copied from another instance can't be paid", (await sa.send({ to: `m${stamp}r`, amount: "1" })).status === 400);
+	let refusedRemote = false;
+	try {
+		await sendMoney(remoteId, b, 100, "", crypto.randomUUID());
+	} catch (e) {
+		refusedRemote = e instanceof MoneyError && e.message.includes("stays on this instance");
+	}
+	check("and can't send money here", refusedRemote);
 
 	// ---- release checks
 	await sql`update money_wallets set balance_cents = 10000 where user_id = any(${sql.array(ids.slice(0, 3), "INT8")})`;

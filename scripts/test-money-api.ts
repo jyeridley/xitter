@@ -114,6 +114,20 @@ try {
 	const earned = (await call(tok.a, "GET", "/money/activity")).earnings;
 	assert.deepEqual([earned[0].likes, earned[0].cents], [1, settings().money.like_cents]);
 
+	// money stays on this instance
+	const away = await call(tok.a, "POST", "/money/send", { to: "someone@other.example", amount_cents: 100, idempotency_key: `k-${tag}-away` });
+	assert.deepEqual([away.status, /stays on this instance/.test(away.error ?? away.errors?.[0]?.message ?? JSON.stringify(away))], [400, true], "no money to another instance");
+	const remote = newId();
+	// tokens are only made for accounts here: one made before the account became another instance's
+	await sql`insert into users(id, screen_name, name, password_hash) values(${remote}::bigint, ${`xmr_${tag}`}, 'R', 'unused')`;
+	try {
+		const remoteToken = await createToken(remote, "t", "write");
+		await sql`update users set instance = 'other.example' where id = ${remote}::bigint`;
+		const fromAway = await call(remoteToken, "GET", "/money");
+		assert.ok([401, 403].includes(fromAway.status), `an account from another instance has no money here (got ${fromAway.status})`);
+	} finally {
+		await sql`delete from users where id = ${remote}::bigint`;
+	}
 	console.log("X Money API checks passed");
 } finally {
 	await setSetting("features", features);

@@ -37,6 +37,7 @@ import {
 	requestUrl,
 	requests,
 	sendMoney,
+	livesHere,
 } from "./money";
 import { badgeUrl, followList, setFollow, userByName, usersByIds } from "./users";
 
@@ -283,6 +284,8 @@ async function uploadMedia(req: Request, v: Viewer) {
 // on for this instance and, before any money moves, the disclaimer accepted
 async function moneyOn(v: Viewer, { accepted = true } = {}) {
 	if (!feature("money")) throw new ApiError(404, `X Money isn't on for ${settings().instance_name}.`);
+	// each instance's money is its own: accounts from elsewhere have none here
+	if (!(await livesHere(v.id))) throw new ApiError(403, "X Money is only for accounts on this instance.");
 	if (accepted && !(await disclaimerAccepted(v.id))) throw new ApiError(403, "Accept X Money's disclaimer first: POST /money/disclaimer.");
 }
 async function moneyCall<T>(f: () => Promise<T>): Promise<T> {

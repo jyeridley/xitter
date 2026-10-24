@@ -71,6 +71,18 @@ export async function acceptDisclaimer(userId: string) {
 	await sql`update money_wallets set disclaimer_at = coalesce(disclaimer_at, now()) where user_id = ${userId}::bigint`;
 }
 
+// Money never crosses instances: each instance's is its own, so only
+// accounts that live here send, ask for, receive or pay it
+const OTHER_INSTANCE = "Money stays on this instance: it can't go to or come from an account on another one.";
+const otherInstance = (handle: string) => /^@?[^\s@]+@[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(handle.trim());
+export async function livesHere(userId: string): Promise<boolean> {
+	const [u] = await sql`select instance is null as here from users where id = ${userId}::bigint`;
+	return !!u?.here;
+}
+async function fromHere(userId: string) {
+	if (!(await livesHere(userId))) throw new MoneyError(OTHER_INSTANCE);
+}
+
 // local, usable accounts only: money stays on this instance
 export async function accountFor(handle: string) {
 	const name = handle.trim().replace(/^@/, "");
@@ -98,6 +110,8 @@ export async function sendMoney(senderId: string, handle: string, amountCents: n
 	note = checkNote(note);
 	if (!/^[\w-]{8,64}$/.test(idem)) throw new MoneyError("The form expired. Try again.");
 	if (requestId !== undefined && !/^\d{1,19}$/.test(requestId)) throw new MoneyError("That request doesn't exist.");
+	if (otherInstance(handle)) throw new MoneyError(OTHER_INSTANCE);
+	await fromHere(senderId);
 	const to = await accountFor(handle);
 	if (!to) throw new MoneyError("There's no account here with that username.");
 	if (to.id === senderId) throw new MoneyError("You can't send money to yourself.");
@@ -167,6 +181,8 @@ export async function unannouncePayment(id: string) {
 // declines), or of anyone when `from` is empty (a "Pay @name" card, with or
 // without an amount).
 export async function requestMoney(requesterId: string, from: string, amountText: string, note: string): Promise<string> {
+	if (otherInstance(from)) throw new MoneyError(OTHER_INSTANCE);
+	await fromHere(requesterId);
 	const [me] = await sql`select status from users where id = ${requesterId}::bigint`;
 	if (me?.status === "restricted") throw new MoneyError("Your account can't ask for money right now.");
 	note = checkNote(note);
