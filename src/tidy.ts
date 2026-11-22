@@ -45,8 +45,7 @@ const ALWAYS = [
 	'[data-testid="toolBar"] [data-testid="ScrollSnap-List"] > [role="presentation"]:has([data-testid="contentDisclosureButton"])',
 	'a[href^="https://ads.x.com"]',
 	'a[href^="https://help.x.com"]',
-	'[data-testid="sidebarColumn"] nav[aria-label="Footer"]',
-	// the signed-out home page's footer keeps Terms and Privacy (our own pages)
+	// footers (the side bar's, the signed-out home page's) keep Terms and Privacy (our own pages)
 	'nav[aria-label="Footer"] > div:has(> a[href^="http"]:not([href$="/tos"]):not([href$="/privacy"]))',
 	'nav[aria-label="Footer"] > div:has(> a[href^="/i/jf/stories"])',
 	// a menu's divider with nothing after it (the More menu ends with one, the
@@ -385,8 +384,10 @@ export const TIDY_SCRIPT = `(function(){
 	// the signed-out footer ends with X's copyright (its name already the
 	// instance's, patch.ts): the instance's name and source instead
 	function footer(){
-		var nav=document.querySelector('nav[aria-label="Footer"]');
-		if(!nav||nav.querySelector("[data-xitter-source]"))return;
+		[].forEach.call(document.querySelectorAll('nav[aria-label="Footer"]'),footerOf);
+	}
+	function footerOf(nav){
+		if(nav.querySelector("[data-xitter-source]"))return;
 		var c=[].find.call(nav.querySelectorAll("span"),function(s){return /^\u00a9 \\d{4} .* Corp\\.$/.test(s.textContent)});
 		if(!c)return;
 		c.textContent=T.instance+" · ";

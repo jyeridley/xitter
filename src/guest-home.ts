@@ -52,3 +52,16 @@ export function patchGuestTimeline(text: string): string {
 }
 
 export const GUEST_CSS = `[data-testid="primaryColumn"] div:has(nav div[role="tab"]):not(:has([data-testid="cellInnerDiv"])),[data-testid="primaryColumn"] div:has([data-testid="tweetTextarea_0_label"]):has([data-testid="toolBar"]):not(:has([data-testid="cellInnerDiv"])){display:none!important}`;
+
+// Jye's election page signed in: the client's own Bookmarks screen, side bar
+// and all, under /i/electionnov22 too, which tidy.ts covers with the page in
+// the main column (signed out it is the guest home's, above)
+const BOOKMARKS_ROUTE = /\(0,([\w$]+)\.jsx\)\(([\w$]+)\.Route,\{component:([\w$]+),exact:!0,path:"\/i\/bookmarks"\},"\/i\/bookmarks"\)/;
+
+export function patchElectionRoute(text: string): string {
+	if (text.includes('"/i/electionnov22"')) return text;
+	const m = BOOKMARKS_ROUTE.exec(text);
+	if (!m) return text;
+	const [whole, jsx, router, component] = m;
+	return text.replace(whole, `(0,${jsx}.jsx)(${router}.Route,{component:${component},exact:!0,path:"/i/electionnov22"},"/i/electionnov22"),${whole}`);
+}

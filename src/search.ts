@@ -201,7 +201,87 @@ export async function cachedTrends(days: number, limit: number, scope: TrendScop
 		cached = { at: Date.now(), rows: loading };
 		trendRows.set(key, cached);
 	}
-	return rankTrends(await scoreTrends(await cached.rows, scope.followedBy), limit);
+	const tags = rankTrends(await scoreTrends(await cached.rows, scope.followedBy), limit);
+	if (tags.length >= limit) return tags;
+	// few hashtags (a small instance): the words and names people are posting
+	// about fill the rest
+	const seen = new Set(tags.map((t) => t.tag.toLowerCase().replace(/^#/, "")));
+	const hidden = new Set(settings().operations.hidden_trends.map((t) => t.toLowerCase()));
+	const words = (await keywordTrends(days)).filter((k) => !seen.has(k.tag.toLowerCase()) && !hidden.has(k.tag.toLowerCase()));
+	return [...tags, ...words].slice(0, limit);
+}
+
+// Words and two-word names common in recent posts, by how many people and
+// posts use them. One scan of at most KEYWORD_POOL posts every few minutes:
+// the last `days` days, or the newest posts whatever their age when those
+// days had none, so trends are only empty when there are no posts at all.
+const KEYWORD_POOL = 3000;
+const KEYWORD_TTL = 5 * 60_000;
+const STOP = new Set(
+	("the a an and or but if then so to of in on at by for with from as is are was were be been being am it its it's this that these those there here " +
+		"i me my mine we us our you your yours he him his she her they them their what which who whom whose when where why how all any both each few more most other some such " +
+		"no not only own same than too very can will just don't should now do does did doing have has had having would could also into over under again further once " +
+		"about above below up down out off get got go going gone make made like one two new just really still even much many well back way im i'm you're we're they're " +
+		"thats that's what's let's ive i've youve you've dont cant can't wont won't didnt didn't isnt isn't arent aren't wasnt wasn't hasnt hasn't havent haven't " +
+		"lol yeah yes okay ok oh hey hi hello thanks thank please via amp http https www com rt today day time people thing things every first last see know think want need say said").split(/\s+/),
+);
+let keywordCache: { at: number; days: number; rows: Promise<{ tag: string; posts: number }[]> } | undefined;
+
+export function keywordTrends(days: number): Promise<{ tag: string; posts: number }[]> {
+	if (keywordCache && keywordCache.days === days && Date.now() - keywordCache.at < KEYWORD_TTL) return keywordCache.rows;
+	const rows = scanKeywords(days).catch((e) => {
+		keywordCache = undefined;
+		throw e;
+	});
+	keywordCache = { at: Date.now(), days, rows };
+	return rows;
+}
+
+async function scanKeywords(days: number): Promise<{ tag: string; posts: number }[]> {
+	const visible = sql`not p.hidden and not p.ad_only and p.circle_owner_id is null and p.user_id not in ${outOfView("0")}
+		and p.user_id in (select id from users where status = 'active' and not protected and not shadow_banned)`;
+	let posts = await sql`select p.user_id::text as who, p.text from posts p where ${visible} and p.created_at > now() - make_interval(days => ${days}) order by p.id desc limit ${KEYWORD_POOL}`;
+	if (!posts.length) posts = await sql`select p.user_id::text as who, p.text from posts p where ${visible} order by p.id desc limit 500`;
+	type Term = { forms: Map<string, number>; posts: number; people: Set<string>; newest: number };
+	const terms = new Map<string, Term>();
+	let at = 0;
+	const add = (key: string, form: string, who: string, inPost: Set<string>) => {
+		if (inPost.has(key)) return;
+		inPost.add(key);
+		const t = terms.get(key) ?? { forms: new Map(), posts: 0, people: new Set(), newest: at };
+		t.forms.set(form, (t.forms.get(form) ?? 0) + 1);
+		t.posts++;
+		t.people.add(who);
+		terms.set(key, t);
+	};
+	for (const p of posts as any[]) {
+		const text = String(p.text)
+			.replace(/https?:\/\/\S+/g, " ")
+			.replace(/[@#]\w+/g, " ");
+		const words = text.split(/[^\p{L}\p{N}'’-]+/u).map((w) => w.replace(/^['’-]+|['’-]+$/g, "")).filter(Boolean);
+		const inPost = new Set<string>();
+		at++;
+		for (let i = 0; i < words.length; i++) {
+			const w = words[i];
+			const lw = w.toLowerCase().replace(/’/g, "'");
+			const ok = lw.length >= 3 && lw.length <= 30 && !STOP.has(lw) && !/^\d+$/.test(lw);
+			if (ok) add(lw, w, p.who, inPost);
+			// names: two capitalised words in a row ("Henry Reyes")
+			const next = words[i + 1];
+			if (next && /^\p{Lu}/u.test(w) && /^\p{Lu}/u.test(next) && !STOP.has(lw) && !STOP.has(next.toLowerCase()) && w.length > 1 && next.length > 1) add(`${lw} ${next.toLowerCase()}`, `${w} ${next}`, p.who, inPost);
+		}
+	}
+	const few = posts.length < 50;
+	const ranked = [...terms]
+		.filter(([, t]) => t.posts >= (few ? 1 : 2))
+		.map(([key, t]) => ({ key, t, phrase: key.includes(" ") }))
+		// a name that always comes as a pair shows as the pair, not its words
+		.filter(({ key, t, phrase }) => phrase || ![...terms].some(([k, o]) => k.includes(" ") && k.split(" ").includes(key) && o.posts >= t.posts))
+		.sort((a, b) => b.t.people.size - a.t.people.size || b.t.posts - a.t.posts || Number(b.phrase) - Number(a.phrase) || a.t.newest - b.t.newest || a.key.localeCompare(b.key));
+	return ranked.slice(0, 30).map(({ t }) => {
+		const form = [...t.forms].sort((a, b) => b[1] - a[1])[0][0];
+		return { tag: /^\p{Ll}/u.test(form) && !form.includes(" ") ? form[0].toUpperCase() + form.slice(1) : form, posts: t.posts };
+	});
 }
 
 async function queryTrends(days: number, country: string | null): Promise<TagPeople[]> {
