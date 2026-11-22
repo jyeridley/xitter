@@ -51,9 +51,10 @@ export function patchGuestTimeline(text: string): string {
 	return text.replace(VIEWER_GUARD, (whole, viewer) => `if(!${viewer}){if(!window.__XITTER_GUEST_HOME__)throw Error("RichHomeTimeline: useModule requires a viewerUserId");${viewer}="0"}`);
 }
 
-// signed out, the home screen's tabs and composer hide; only on home: Explore
-// and search keep their headers (data-xg-home, GUEST_SCRIPT)
-export const GUEST_CSS = `html[data-xg-home] [data-testid="primaryColumn"] div:has([data-testid="tweetTextarea_0_label"]):has([data-testid="toolBar"]):not(:has([data-testid="cellInnerDiv"])),html[data-xg-home] [data-testid="primaryColumn"] div:has(nav div[role="tab"]):not(:has([data-testid="cellInnerDiv"])){display:none!important}
+// signed out, the home screen's composer hides; its tabs show (For you, and the
+// pinned lists: All is every public post, newest first) but not Following.
+// Only on home: Explore and search keep their headers (data-xg-home, GUEST_SCRIPT)
+export const GUEST_CSS = `html[data-xg-home] [data-testid="primaryColumn"] div:has([data-testid="tweetTextarea_0_label"]):has([data-testid="toolBar"]):not(:has([data-testid="cellInnerDiv"])),html[data-xg-home] [role="presentation"]:has(> [data-xg-following]),html[data-xg-home] button[aria-label="Manage timelines"]{display:none!important}
 #xg-search{padding:4px 0 12px;background:inherit}
 #xg-search label{display:flex;align-items:center;gap:12px;height:42px;padding:0 16px;border-radius:9999px;border:1px solid rgba(128,128,128,.35);color:rgb(113,118,123);cursor:text}
 #xg-search label:focus-within{border-color:var(--xt-accent,#1d9bf0);box-shadow:inset 0 0 0 1px var(--xt-accent,#1d9bf0)}
@@ -64,7 +65,7 @@ export const GUEST_CSS = `html[data-xg-home] [data-testid="primaryColumn"] div:h
 export const GUEST_SCRIPT = `(function(){var last,ICON='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.25 3.75c-3.59 0-6.5 2.91-6.5 6.5s2.91 6.5 6.5 6.5c1.795 0 3.419-.726 4.596-1.904 1.178-1.177 1.904-2.801 1.904-4.596 0-3.59-2.91-6.5-6.5-6.5zm-8.5 6.5c0-4.694 3.806-8.5 8.5-8.5s8.5 3.806 8.5 8.5c0 1.986-.682 3.815-1.824 5.262l4.781 4.781-1.414 1.414-4.781-4.781c-1.447 1.142-3.276 1.824-5.262 1.824-4.694 0-8.5-3.806-8.5-8.5z"></path></svg>';
 function go(u){history.pushState({},"",u);dispatchEvent(new PopStateEvent("popstate",{state:{}}))}
 function box(){var side=document.querySelector('[data-testid="sidebarColumn"]');var p=location.pathname;var own=p.indexOf("/search")===0||p.indexOf("/explore")===0;var have=document.getElementById("xg-search");if(have&&(own||!side||!side.contains(have))){have.remove();have=null}if(have||own||!side||side.querySelector('[data-testid="SearchBox_Search_Input"]'))return;var el=side;while(el.children.length===1)el=el.children[0];var fx=[].find.call(el.children,function(k){return getComputedStyle(k).position==="fixed"});if(fx){el=fx;while(el.children.length===1)el=el.children[0]}if(!el.querySelector("aside, section, nav"))return;var f=document.createElement("form");f.id="xg-search";f.setAttribute("role","search");f.innerHTML='<label>'+ICON+'<input type="search" placeholder="Search" aria-label="Search query" enterkeyhint="search" data-testid="SearchBox_Search_Input"></label>';f.style.backgroundColor=getComputedStyle(document.body).backgroundColor;f.querySelector("input").style.color=getComputedStyle(document.body).color;f.addEventListener("submit",function(e){e.preventDefault();var q=f.querySelector("input").value.trim();if(q)go("/search?q="+encodeURIComponent(q)+"&src=typed_query")});el.insertBefore(f,el.firstChild)}
-function tick(){var p=location.pathname,h=p==="/"||p==="/home";if(h!==last){last=h;document.documentElement.toggleAttribute("data-xg-home",h)}box()}setInterval(tick,300);tick()})();`;
+function tick(){var p=location.pathname,h=p==="/"||p==="/home";if(h!==last){last=h;document.documentElement.toggleAttribute("data-xg-home",h)}if(h)document.querySelectorAll('[role="tab"]').forEach(function(t){if(t.textContent.trim()==="Following")t.setAttribute("data-xg-following","")});box()}setInterval(tick,300);tick()})();`;
 
 // Jye's election page signed in: the client's own Bookmarks screen, side bar
 // and all, under /i/electionnov22 too, which tidy.ts covers with the page in
