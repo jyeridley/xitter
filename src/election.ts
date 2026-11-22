@@ -8,6 +8,10 @@ import { readFileSync, readdirSync } from "node:fs";
 import type { Viewer } from "./auth";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
+import { electionCardHtml } from "./election-card";
+import { electionSummary, stateDetail } from "./election-data";
+import { electionImage } from "./election-og";
+import { electionPage } from "./election-page";
 
 export const ELECTION_PATH = "/i/electionnov22";
 const DIR = new URL("../election/", import.meta.url).pathname;
@@ -43,7 +47,7 @@ function load(): Assets {
 <meta property="og:title" content="${title}">
 <meta property="og:description" content="${desc}">
 <meta property="og:type" content="website">
-<meta property="og:url" content="${PUBLIC_ORIGIN}${ELECTION_PATH}">
+<meta property="og:url" content="${PUBLIC_ORIGIN}${ELECTION_PATH}/classic">
 <meta name="description" content="${desc}">
 <meta name="theme-color" content="#101418">`,
 	);
@@ -52,7 +56,7 @@ function load(): Assets {
 	page = page.replaceAll("fetch('counties/'+", `fetch('${base}/counties/'+`);
 	swap(
 		/<\/body>/,
-		`<a href="/home" id="xitterBack" style="position:fixed;left:10px;bottom:10px;z-index:2147483000;font:600 12px/1 Barlow,system-ui,sans-serif;color:#fff;background:rgba(16,20,24,.72);padding:7px 10px;border-radius:999px;text-decoration:none;letter-spacing:.02em;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)">← Xitter</a>
+		`<a href="/i/electionnov22" id="xitterBack" style="position:fixed;left:10px;bottom:10px;z-index:2147483000;font:600 12px/1 Barlow,system-ui,sans-serif;color:#fff;background:rgba(16,20,24,.72);padding:7px 10px;border-radius:999px;text-decoration:none;letter-spacing:.02em;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)">← Results</a>
 </body>`,
 	);
 	return { page, files, base };
@@ -86,6 +90,16 @@ export async function electionRoute(req: Request, p: string, viewer: Viewer | un
 	assets ??= load();
 	if (p === ELECTION_PATH || p === `${ELECTION_PATH}/`) {
 		if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405 });
+		return electionPage(req, viewer);
+	}
+	if (p === `${ELECTION_PATH}/og.png` || p === `${ELECTION_PATH}/map.png`) {
+		const view = new URL(req.url).searchParams.get("view") === "archive" ? "archive" : "auto";
+		const body = await electionImage(p.endsWith("og.png") ? "og" : "map", view);
+		// the address carries the result (?v=), so a versioned one keeps
+		return new Response(body, { headers: { "content-type": "image/png", "cache-control": new URL(req.url).searchParams.has("v") ? "public, max-age=300" : "public, max-age=30" } });
+	}
+	if (p === `${ELECTION_PATH}/classic` || p === `${ELECTION_PATH}/classic/`) {
+		if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405 });
 		return new Response(assets.page, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache", "x-content-type-options": "nosniff" } });
 	}
 	const a = /^\/i\/electionnov22\/a\/([a-z0-9]+)\/(.+)$/.exec(p);
@@ -100,6 +114,13 @@ export async function electionRoute(req: Request, p: string, viewer: Viewer | un
 	const url = new URL(req.url);
 
 	if (what === "me") return json({ canWrite: isAdmin(viewer) });
+	if (what === "summary" && req.method === "GET") return Response.json(await electionSummary(url.searchParams.get("view") === "archive" ? "archive" : "auto"), { headers: { "cache-control": "public, max-age=10" } });
+	if (what === "card" && req.method === "GET")
+		return new Response(electionCardHtml(await electionSummary()), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=15", "x-content-type-options": "nosniff" } });
+	if (what === "state" && req.method === "GET") {
+		const d = stateDetail(url.searchParams.get("k") ?? "");
+		return d ? Response.json(d, { headers: { "cache-control": "public, max-age=3600" } }) : json({ error: "not found" }, 404);
+	}
 
 	if (what === "doc") {
 		const path = url.searchParams.get("path") ?? "";

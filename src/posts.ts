@@ -12,6 +12,7 @@ import type { PostRow } from "./model";
 import { articlesByIds } from "./articles";
 import { blockedFor, federatedHiddenFor, hasMutedWord, isBlockedEitherWay, mutedFor, outOfView, protectedFor, replyLimited, shadowedFor, suspendedFor } from "./blocks";
 import { staffViewer } from "./staff-access";
+import { electionLinkCard, isElectionLink } from "./election-card";
 import { fetchPreview, linkCard, linksIn, previewable, previewsFor, statusLinkOf } from "./links";
 import { paymentCards, rewardLike } from "./money";
 import { mediaForPosts } from "./media";
@@ -177,6 +178,12 @@ async function hydrate(viewerId: string, posts: PostRow[], quotes = true): Promi
 	for (const p of posts) {
 		const preview = previews.get(linkOf(p) ?? "");
 		if (preview) p.linkCard = linkCard(preview);
+	}
+	// a link to the election page: its results card (election-card.ts)
+	for (const p of posts) {
+		if (p.linkCard || p.poll || p.conversationCard || p.quote_id || p.quoted || p.article_id || p.media?.length) continue;
+		const link = linksIn(p.text).map((l) => l.url).filter(isElectionLink).at(-1);
+		if (link) p.linkCard = await electionLinkCard(link).catch(() => undefined);
 	}
 	// a payment's link put in by one of its sides, or a request's by its
 	// requester, becomes its card (money.ts)
