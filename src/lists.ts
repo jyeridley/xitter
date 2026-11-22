@@ -37,8 +37,8 @@ const missing = () => new PostError("List not found.", 144);
 // and /all opens it.
 export const ALL_ID = "1";
 // "Government": every post by an account with the grey badge (users.verified_type
-// government or government_individual), their own posts and their threads, no
-// reposts. Built in like All, and a home tab for everyone until they unpin it.
+// government or government_individual): their original posts only, no replies
+// (their own threads' either) and no reposts. Built in like All, and a home tab for everyone until they unpin it.
 export const GOV_ID = "2";
 const builtIn = (id: string) => id === ALL_ID || id === GOV_ID;
 export const GOV_TYPES = sql`('government', 'government_individual')`;
@@ -258,7 +258,7 @@ async function tweetTimeline(viewerId: string, id: string, vars: Vars) {
 	const items = await feed({
 		viewerId,
 		authors: id === ALL_ID ? { all: true } : id === GOV_ID ? { gov: true } : { list: id },
-		replies: id === ALL_ID ? true : id === GOV_ID ? "self" : false,
+		replies: id === ALL_ID,
 		kinds: id === GOV_ID ? "posts" : "both",
 		limit: count,
 		...(newer ? { after: at } : { before: at }),
