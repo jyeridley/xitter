@@ -6,7 +6,38 @@ import { vapidPublicKey } from "./push";
 import { settings } from "./settings";
 import { patchCountryAudience } from "./reply-control-client";
 import { patchCircleComposer } from "./circles";
-import { patchElectionRoute, patchGuestHome, patchGuestTimeline } from "./guest-home";
+import { patchElectionRoute, patchGuestHome, patchGuestReplies, patchGuestScreens, patchGuestTimeline } from "./guest-home";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { clientDir } from "./client-cache";
+
+// the signed-in routes and main.js of the build being served, which the
+// signed-out routes borrow screens from (guest-home.ts); the archive keeps old
+// builds' files too, so the names come from the build's runtime.js
+const routesSources = new Map<string, string>();
+function buildFile(which: "routes" | "main"): string | undefined {
+	const root = clientDir();
+	const key = `${root}\0${which}`;
+	const known = routesSources.get(key);
+	if (known) return known;
+	let text: string | undefined;
+	try {
+		const dir = join(root, "abs/responsive-web/client-web");
+		let name: string | undefined;
+		if (which === "main") {
+			const scripts: string[] = JSON.parse(readFileSync(join(root, "build.json"), "utf8")).scripts ?? [];
+			name = scripts.find((f) => /\/main\.\w+\.js$/.test(f))?.split("/").pop();
+		} else {
+			const runtime = readFileSync(join(root, "runtime.js"), "utf8");
+			const id = /[{,](\d{1,9}):"bundle\.Routes"/.exec(runtime)?.[1];
+			const hash = id && new RegExp(`[{,]${id}:"([0-9a-f]{8,32})"`).exec(runtime)?.[1];
+			name = hash ? `bundle.Routes.${hash}a.js` : undefined;
+		}
+		if (name && readdirSync(dir).includes(name)) text = readFileSync(join(dir, name), "utf8");
+	} catch {}
+	if (text) routesSources.set(key, text);
+	return text;
+}
 
 // X's VAPID public key, which the client subscribes to push with; pushes can
 // only be signed with the private half, so the instance's own goes in its place
@@ -228,7 +259,11 @@ export function patchText(text: string, chat = false): string {
 	for ([re, to] of chat ? [...CHAT_RULES, ...RULES] : RULES) out = out.replace(re, to);
 	out = patchCountryAudience(out);
 	out = patchCircleComposer(out);
-	out = patchElectionRoute(patchGuestTimeline(patchGuestHome(out)));
+	if (out.includes('"home_redirect_lo"')) {
+		out = patchGuestScreens(out, buildFile("routes"), buildFile("main"));
+		routesSources.clear(); // the patched file is cached; the sources need not be
+	}
+	out = patchGuestReplies(patchElectionRoute(patchGuestTimeline(patchGuestHome(out))));
 	if (!out.includes("ConversationControlsQuery")) return out;
 	// newer clients pass more props between options and value (requiresSelection:n=!1)
 	return out.replace(/function [\w$]+\(\{onApply:[\w$]+,onBack:[\w$]+,options:([\w$]+),(?:[\w$]+:[\w$]+(?:=[\w$!.]{1,20})?,){0,4}value:[\w$]+\}\)\{let\[[\w$]+,[\w$]+\]=([\w$]+)\.useState\([\s\S]{0,16000}?(?=let [\w$]+=[\w$]+\.A\.create)/g, (picker, options, react) => {

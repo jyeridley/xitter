@@ -13,7 +13,7 @@
 //   filter:follows                   authors the viewer follows
 //   lang:xx, near:, other operators  accepted and ignored
 
-import { blockedFor, federatedHiddenFor, namesOtherInstance, outOfView, protectedFor } from "./blocks";
+import { blockedFor, federatedHiddenFor, GUEST_ID, hiddenFromGuests, namesOtherInstance, outOfView, protectedFor } from "./blocks";
 import { sql } from "./db";
 import { settings } from "./settings";
 import { isId } from "./ids";
@@ -151,6 +151,7 @@ export async function searchUsers(viewerId: string, query: string, limit: number
 	const first = words[0];
 	const rows = await sql`select u.id from users u where ${cond}
 			and u.status <> 'suspended' and u.id not in ${outOfView(viewerId)} and u.id not in ${blockedFor(viewerId)}
+			${viewerId === GUEST_ID ? sql`and not ${hiddenFromGuests(sql`u`)}` : sql``}
 			${namesOtherInstance(query) ? sql`` : sql`and u.id not in ${federatedHiddenFor(viewerId)}`}
 		order by (lower(u.screen_name) = lower(${first})) desc, (u.screen_name ilike ${`${first.replace(/[\\%_]/g, "")}%`}) desc,
 			(select count(*) from follows f where f.followee_id = u.id) desc, u.id
@@ -239,7 +240,7 @@ export function keywordTrends(days: number): Promise<{ tag: string; posts: numbe
 
 async function scanKeywords(days: number): Promise<{ tag: string; posts: number }[]> {
 	const visible = sql`not p.hidden and not p.ad_only and p.circle_owner_id is null and p.user_id not in ${outOfView("0")}
-		and p.user_id in (select id from users where status = 'active' and not protected and not shadow_banned)`;
+		and p.user_id in (select id from users where status = 'active' and not protected and not shadow_banned and not ${hiddenFromGuests()})`;
 	let posts = await sql`select p.user_id::text as who, p.text from posts p where ${visible} and p.created_at > now() - make_interval(days => ${days}) order by p.id desc limit ${KEYWORD_POOL}`;
 	if (!posts.length) posts = await sql`select p.user_id::text as who, p.text from posts p where ${visible} order by p.id desc limit 500`;
 	type Term = { forms: Map<string, number>; posts: number; people: Set<string>; newest: number };
