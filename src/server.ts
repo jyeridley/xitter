@@ -92,6 +92,7 @@ import { cardsApi, payMeApi, recentApi } from "./money";
 import { merchantRoute, moneyRoute } from "./money-page";
 import { expireShopCheckmarks } from "./money-shop";
 import { restrictedPage, restrictedRefuses } from "./restricted-page";
+import { VERIFIED_ART } from "./verified-art";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -141,6 +142,8 @@ async function servePublic(p: string): Promise<Response> {
 	if (uploaded && (await uploaded.file.exists())) return new Response(uploaded.file, { headers: { "content-type": uploaded.type, "cache-control": "no-cache" } });
 	const file = Bun.file(`${PUBLIC_DIR}/${name}`);
 	if (!(await file.exists())) return new Response("not found", { status: 404 });
+	// checkmark art: its address carries a hash of it (verified-art.ts)
+	if (VERIFIED_ART.test(name)) return new Response(file, { headers: { "content-type": "image/webp", "cache-control": "public, max-age=31536000, immutable" } });
 	return new Response(file, { headers: { "cache-control": "no-cache" } });
 }
 
