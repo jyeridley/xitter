@@ -6,7 +6,9 @@
 
 import { readFileSync, readdirSync } from "node:fs";
 import type { Viewer } from "./auth";
+import { loadBuild } from "./build";
 import { PUBLIC_ORIGIN } from "./config";
+import { settings } from "./settings";
 import { sql } from "./db";
 import { electionCardHtml } from "./election-card";
 import { electionSummary, stateDetail } from "./election-data";
@@ -88,8 +90,13 @@ const sameSite = (req: Request) => req.headers.get("origin") === PUBLIC_ORIGIN;
 export async function electionRoute(req: Request, p: string, viewer: Viewer | undefined): Promise<Response | undefined> {
 	if (p !== ELECTION_PATH && !p.startsWith(`${ELECTION_PATH}/`)) return;
 	assets ??= load();
-	if (p === ELECTION_PATH || p === `${ELECTION_PATH}/`) {
+	if (p === ELECTION_PATH || p === `${ELECTION_PATH}/` || p === `${ELECTION_PATH}/embed`) {
 		if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405 });
+		// a browser opening the page itself gets it inside the client, with its
+		// side bars (tidy.ts frames /embed in the main column); frames, ?embed=1,
+		// link fetchers and the 2020 client get the page alone
+		const top = p !== `${ELECTION_PATH}/embed` && req.headers.get("sec-fetch-dest") === "document" && !new URL(req.url).searchParams.has("embed");
+		if (top && !loadBuild()?.build.stateBase && (viewer || settings().operations.guest_reading)) return undefined;
 		return electionPage(req, viewer);
 	}
 	if (p === `${ELECTION_PATH}/og.png` || p === `${ELECTION_PATH}/map.png`) {
@@ -114,6 +121,22 @@ export async function electionRoute(req: Request, p: string, viewer: Viewer | un
 	const url = new URL(req.url);
 
 	if (what === "me") return json({ canWrite: isAdmin(viewer) });
+	// the right side bar the page gets inside the client (election-card.ts)
+	if (what === "side" && req.method === "GET") {
+		const name = settings().instance_name;
+		if (!viewer) return json({ guest: true, instance: name });
+		const { cachedTrends } = await import("./search");
+		const { trendScope } = await import("./explore-settings");
+		const { suggestedUsers } = await import("./users");
+		const { avatarSrc } = await import("./model");
+		const scope = await trendScope(viewer.id);
+		const [trends, users] = await Promise.all([cachedTrends(7, 5, scope).catch(() => []), suggestedUsers(viewer.id, 3).catch(() => [])]);
+		return json({
+			instance: name,
+			trends: trends.map((t) => ({ tag: t.tag, label: scope.label || "Trending", posts: t.posts })),
+			follow: users.map((u: any) => ({ id: u.id, name: u.name, screen_name: u.screen_name, avatar: avatarSrc(u.avatar_url) ?? "/abs/sticky/default_profile_images/default_profile_normal.png", verified: u.verified_type ?? null })),
+		});
+	}
 	if (what === "summary" && req.method === "GET") return Response.json(await electionSummary(url.searchParams.get("view") === "archive" ? "archive" : "auto"), { headers: { "cache-control": "public, max-age=10" } });
 	if (what === "card" && req.method === "GET")
 		return new Response(electionCardHtml(await electionSummary()), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=15", "x-content-type-options": "nosniff" } });

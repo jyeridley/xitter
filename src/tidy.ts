@@ -270,9 +270,11 @@ export const TIDY_SCRIPT = `(function(){
 	var OWN="/settings/xitter/";
 	// the side bar's own entries (where "nav") open on a path of the client's
 	// own instead, which it answers with its not-found page in the main column
-	var FULL={"/i/xmoney":"/account/money","/i/ads":"/account/ads","/i/circles":"/account/circle"};
+	// (and Jye's election page, election.ts: its own pages under it stay its own)
+	var FULL={"/i/xmoney":"/account/money","/i/ads":"/account/ads","/i/circles":"/account/circle","/i/electionnov22":"/i/electionnov22/embed"};
+	var WHOLE={"/i/electionnov22":1};
 	// and the pages under it (a payment: /i/xmoney/p/<id>)
-	function fullOf(p){for(var k in FULL)if(p===k||p.indexOf(k+"/")===0)return FULL[k]+p.slice(k.length)}
+	function fullOf(p){for(var k in FULL)if(p===k||(!WHOLE[k]&&p.indexOf(k+"/")===0))return FULL[k]+p.slice(k.length)}
 	function full(p){for(var k in FULL)if(p===FULL[k]||p.indexOf(FULL[k]+"/")===0)return k+p.slice(FULL[k].length)}
 	function own(href){
 		var u=new URL(href,location.href);
@@ -339,7 +341,7 @@ export const TIDY_SCRIPT = `(function(){
 			if(!d||!d.body)return;
 			var at=w.location.pathname+w.location.search;
 			// a form sent inside the frame can land outside our pages
-			if(w.location.pathname.indexOf("/account/")!==0){stopPaneFit();f.remove();go(at,true);return}
+			if(w.location.pathname.indexOf("/account/")!==0&&w.location.pathname!=="/i/electionnov22/embed"){stopPaneFit();f.remove();go(at,true);return}
 			// a look saved on the theme page only reaches the client on a fresh load
 			if(w.location.pathname==="/account/theme"&&f.getAttribute("data-was")==="/account/theme"){location.reload();return}
 			f.setAttribute("data-was",w.location.pathname);

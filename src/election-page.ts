@@ -178,6 +178,9 @@ function open(k){
 	document.getElementById("elSheetT").textContent=row?row.querySelector("b").textContent:k;
 	var body=document.getElementById("elSheetB");body.innerHTML='<p class="dim">Loading…</p>';
 	if(dlg.showModal)dlg.showModal();else dlg.setAttribute("open","");
+	// framed in the client the frame is as tall as the page: the sheet goes where the reader is
+	var fe=null;try{fe=window.frameElement}catch(e){}
+	if(fe){var r=fe.getBoundingClientRect(),vh=parent.innerHeight;dlg.style.position="absolute";dlg.style.margin="0 auto";dlg.style.maxHeight=Math.min(800,vh*.9)+"px";dlg.style.top=Math.max(0,-r.top+Math.max(16,vh*.05))+"px"}
 	if("${mode}"!=="final"){body.innerHTML=row?'<p>'+esc(row.querySelector(".el-rname .dim").textContent)+' · '+esc(row.querySelector(".el-rr b").textContent)+'</p><p class="dim">County results show once the night\\'s results are final.</p>':"";return}
 	fetch("${"/i/electionnov22"}/api/state?k="+encodeURIComponent(k)).then(function(r){return r.json()}).then(function(d){
 		if(!d||!d.counties){body.innerHTML='<p class="dim">No county results for this one.</p>';return}
@@ -189,6 +192,8 @@ function open(k){
 	},function(){body.innerHTML='<p class="dim">Couldn\\'t load counties.</p>'});
 }
 document.addEventListener("click",function(e){var t=e.target.closest&&e.target.closest("[data-k]");if(!t||t.closest("dialog"))return;open(t.getAttribute("data-k"))});
+// the classic map is a page of its own, outside the client
+[].forEach.call(document.querySelectorAll("a[data-whole]"),function(a){a.addEventListener("click",function(e){if(e.button||e.metaKey||e.ctrlKey||e.shiftKey)return;e.preventDefault();e.stopImmediatePropagation();top.location.assign(a.href)},true)});
 document.getElementById("elClose").onclick=function(){dlg.close?dlg.close():dlg.removeAttribute("open")};
 dlg.addEventListener("click",function(e){if(e.target===dlg)dlg.close()});
 // live: a new result reloads the page, on the same tab
@@ -241,7 +246,7 @@ ${s.totalVotes ? `<p class="dim">${n(s.totalVotes)} votes counted nationwide.</p
 <section class="el-panel" id="states" role="tabpanel" hidden><div class="el-list">${s.states.map((x) => stateRow(s, x)).join("")}</div></section>
 <section class="el-panel" id="congress" role="tabpanel" hidden>${s.congress.map((c) => congressCard(c, true)).join("")}</section>
 <section class="el-panel" id="timeline" role="tabpanel" hidden>${timeline(s)}</section>
-<div class="el-foot">${s.mode === "live" ? `<a href="/i/electionnov22?view=archive">November 2026 archive</a>` : view === "archive" ? `<a href="/i/electionnov22">Live map</a>` : ""}<a href="/i/electionnov22/classic">Classic map and editor</a></div>
+<div class="el-foot">${s.mode === "live" ? `<a href="/i/electionnov22?view=archive">November 2026 archive</a>` : view === "archive" ? `<a href="/i/electionnov22">Live map</a>` : ""}<a href="/i/electionnov22/classic" data-whole>Classic map and editor</a></div>
 <dialog class="el-sheet" id="elSheet"><div class="el-shead"><button id="elClose" type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M10.59 12L4.54 5.96l1.42-1.42L12 10.59l6.04-6.05 1.42 1.42L13.41 12l6.05 6.04-1.42 1.42L12 13.41l-6.04 6.05-1.42-1.42L10.59 12z"/></svg></button><div class="title" id="elSheetT"></div></div><div class="el-sbody" id="elSheetB"></div></dialog>
 <script>${SCRIPT(s.mode, s.updatedAt, view).replace("__NAMES__", names)}</script>`;
 	return accountPage({ req, title: ELECTION_TITLE, body, viewer: viewer ?? null, back: { href: "/home", label: "Back" }, cache: "no-cache", css: CSS, head, referrer: null });

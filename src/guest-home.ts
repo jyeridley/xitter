@@ -38,7 +38,10 @@ export function patchGuestHome(text: string): string {
 	const n = require[1];
 	const guestHome = `(window.__xitterGuestHome||(window.__xitterGuestHome=${n}(${home.lazyModule}).${home.lazyFn}(${n}(${id}).b)))`;
 	const routeEl = `(0,${jsx}.jsx)(${route[1]}.Route,{exact:!0,path:"/home",render:e=>window.__XITTER_GUEST_HOME__?(0,${jsx}.jsx)(${guestHome},{...e}):(0,${jsx}.jsx)(${redirectNs}.A,{to:"/"})},"home_redirect_lo")`;
-	return text.replace(whole, routeEl);
+	// Jye's election page (election.ts) signed out: the guest home's frame, side
+	// bars and all, which tidy.ts covers with the page in the main column
+	const electionEl = `(0,${jsx}.jsx)(${route[1]}.Route,{exact:!0,path:"/i/electionnov22",render:e=>window.__XITTER_GUEST_HOME__?(0,${jsx}.jsx)(${guestHome},{...e}):(0,${jsx}.jsx)(${redirectNs}.A,{to:"/"})},"election_lo")`;
+	return text.replace(whole, `${routeEl},${electionEl}`);
 }
 
 const VIEWER_GUARD = /if\(!([\w$]+)\)throw Error\("RichHomeTimeline: useModule requires a viewerUserId"\)/;

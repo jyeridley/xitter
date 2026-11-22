@@ -36,7 +36,7 @@ import { SQUARE_MARK, legacyUser } from "./model";
 import { patchText } from "./patch";
 import { PWA_SCRIPT, pwaHead } from "./pwa";
 import { MONEY_UI_CSS, MONEY_UI_SCRIPT } from "./money-ui";
-import { ELECTION_CARD_CSS, ELECTION_CARD_SCRIPT } from "./election-card";
+import { ELECTION_CARD_CSS, ELECTION_CARD_SCRIPT, ELECTION_SIDE_CSS, ELECTION_SIDE_SCRIPT } from "./election-card";
 
 // account settings as the client expects them
 export function settingsFor(user: User): Record<string, unknown> {
@@ -332,6 +332,7 @@ ${BADGES_SCRIPT}
 ${verifiedArtScript()}
 ${GOV_FEED_SCRIPT}
 ${ELECTION_CARD_SCRIPT}
+${ELECTION_SIDE_SCRIPT}
 ${signedIn ? THEME_SCRIPT : ""}
 ${signedIn ? DECOR_SCRIPT : ""}
 ${DECORATIONS_SCRIPT}
@@ -451,6 +452,7 @@ ${PRONOUNS_CSS}
 ${STICKER_PICKER_CSS}${bootAccentCss(accent)}${theme ? bootCss(theme, paint) : ""}
 ${CONVERSATION_CARD_CSS}
 ${ELECTION_CARD_CSS}
+${ELECTION_SIDE_CSS}
 ${COMPOSER_BUTTON_CSS}
 ${user ? MONEY_UI_CSS : ""}
 ${user?.classic_post_details ? CLASSIC_DETAIL_CSS : ""}
