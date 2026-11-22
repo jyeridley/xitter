@@ -93,6 +93,7 @@ import { merchantRoute, moneyRoute } from "./money-page";
 import { expireShopCheckmarks } from "./money-shop";
 import { restrictedPage, restrictedRefuses } from "./restricted-page";
 import { VERIFIED_ART } from "./verified-art";
+import { electionRoute } from "./election";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -597,6 +598,11 @@ async function route(req: Request): Promise<Response | undefined> {
 		return Response.redirect("/account/suspended", 302);
 	}
 	if (p === "/account/suspended" && req.method === "GET") return Response.redirect("/home", 302);
+	// Jye's election night page, its own page outside the client (election.ts)
+	{
+		const election = await electionRoute(req, p, viewer);
+		if (election) return election;
+	}
 	setRequestLanguage(viewer?.language ?? undefined);
 	if (!p.startsWith("/api/")) setHidden({ parody: !!viewer?.hide_parody_labels, checks: !!viewer?.hide_checkmarks });
 	if (req.method === "GET" && url.searchParams.has("client") && !API_PREFIX.test(p)) {

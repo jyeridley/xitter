@@ -1944,3 +1944,10 @@ create index if not exists ads_post_idx on ads (post_id) where post_id is not nu
 
 -- lists.ts GOV_ID: the Government feed's authors, the grey-badge accounts
 create index if not exists users_gov_idx on users (id) where verified_type in ('government', 'government_individual');
+
+-- election.ts: the /i/electionnov22 page's shared documents (its live map)
+create table if not exists election_docs (
+	path text primary key,
+	data jsonb not null,
+	updated_at timestamptz not null default now()
+);
