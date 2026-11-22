@@ -35,7 +35,7 @@ export const PERMISSIONS: Record<string, Permission> = {
 	staff_notes: { group: "Accounts", label: "Write staff notes", role: "support", actions: ["addStaffNote"] },
 	// whoever resets a password sees the new one and can sign in as the account
 	passwords: { group: "Accounts", label: "Reset passwords (they see the new password, so they can sign in as the account)", role: "admin", actions: ["resetPassword"] },
-	sessions: { group: "Accounts", label: "Sign accounts out and revoke their API tokens", role: "support", actions: ["signOut", "revokeSession", "revokeApiTokens"] },
+	sessions: { group: "Accounts", label: "Sign accounts out, revoke their API tokens and clear linked Roblox accounts", role: "support", actions: ["signOut", "revokeSession", "revokeApiTokens", "clearRoblox"] },
 	profiles: { group: "Accounts", label: "Edit profiles and the counts shown on profiles and posts", role: "admin", actions: ["updateUser", "setUserCounts", "setPostCounts"] },
 	account_badges: { group: "Accounts", label: "Give badges, labels and flags", role: "admin", actions: ["setBadge", "setTranslator", "setFlag", "setBadges", "setProfileLabel", "setOrgBadge"] },
 	staff_community_notes: { group: "Accounts", label: "Put community notes on posts, shown without ratings", role: "admin", actions: ["setPostNote"] },

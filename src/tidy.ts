@@ -8,6 +8,7 @@ import { sql } from "./db";
 import { isOrganizationSql } from "./users";
 import { type Feature, feature, settings } from "./settings";
 import { choiceAllowed } from "./client-choice";
+import { ROBLOX_ICON, robloxConfigured } from "./roblox";
 import { gifProviders } from "./gifs";
 
 const links = (...hrefs: string[]) => hrefs.map((h) => `a[href="${h}"],a[href^="${h}?"]`);
@@ -136,6 +137,7 @@ export async function menuLinks(userId: string): Promise<MenuLink[]> {
 	links.push({ href: "/account/automation", text: "Automation", description: "Name the account that runs this one.", icon: ROBOT, where: "tabs" });
 	if (u?.notices) links.push({ href: "/account/notices", text: "Staff notices", description: `Messages, warnings and strikes from the ${s.instance_name} team, and your appeals.`, icon: SHIELD, where: "both" });
 	if (FEDERATION_ON) links.push({ href: "/account/instances", text: "Other instances", description: "Hide accounts and organisations from other instances.", icon: GLOBE, viewBox: "0 -960 960 960", where: "settings" });
+	if (robloxConfigured()) links.push({ href: "/account/roblox", text: "Roblox account", description: "Link your Roblox account and show it, verified, on your profile.", icon: ROBLOX_ICON, where: "settings" });
 	links.push({ href: "/account/passkeys", text: "Passkeys", description: "Sign in with your fingerprint, face or screen lock instead of a password.", icon: KEY, viewBox: "0 -960 960 960", where: "settings" });
 	if (feature("archive_import")) links.push({ href: "/account/import", text: "Import from X", description: "Bring your posts, photos and videos over from your X archive.", icon: UPLOAD, viewBox: "0 -960 960 960", where: "settings" });
 	if (feature("migration")) links.push({ href: "/account/migrate", text: "Move account", description: "Bring your account here from another instance, or take it to another one.", icon: MOVE, where: "settings" });

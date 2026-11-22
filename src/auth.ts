@@ -17,6 +17,8 @@ export type User = {
 	verified_type: "blue" | "business" | "government" | "government_individual" | null;
 	flag?: string | null;
 	pronouns?: string | null;
+	// a linked Roblox account the person shows on their profile (roblox.ts)
+	roblox?: { id: string; username: string; display_name: string | null } | null;
 	// custom badges in order (admin panel); see badgeList in model.ts
 	badges?: { id: string; name: string }[];
 	remote_badges?: { name: string; url: string }[];

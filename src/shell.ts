@@ -30,6 +30,7 @@ import { clientLook, themeForClient, type Look } from "./themes/validate";
 import { NOTICE_SCRIPT } from "./automod-notice";
 import { FLAG_PICKER_CSS, FLAG_PICKER_SCRIPT, flagPickerData } from "./flag-picker";
 import { PRONOUNS_CSS, PRONOUNS_SCRIPT, pronounsData } from "./pronouns";
+import { ROBLOX_CSS, ROBLOX_SCRIPT } from "./roblox";
 import { CLASSIC_DETAIL_CSS, CLASSIC_DETAIL_SCRIPT } from "./classic-detail";
 import { CAP_SCRIPT } from "./cap";
 import { MAX_POST_MEDIA, PUBLIC_ORIGIN } from "./config";
@@ -320,6 +321,7 @@ ${FORGOT_SCRIPT}
 ${signedIn ? "" : PASSKEY_SCRIPT}
 ${CAP_SCRIPT}
 ${PRONOUNS_SCRIPT}
+${ROBLOX_SCRIPT}
 ${FLAG_PICKER_SCRIPT}
 ${signedIn ? COMPOSER_BUTTON_SCRIPT : ""}
 ${signedIn ? STICKER_PICKER_SCRIPT : ""}
@@ -462,6 +464,7 @@ html{-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%}
 ${hideCss()}
 ${FLAG_PICKER_CSS}
 ${PRONOUNS_CSS}
+${ROBLOX_CSS}
 ${STICKER_PICKER_CSS}${bootAccentCss(accent)}${theme ? bootCss(theme, paint) : ""}
 ${CONVERSATION_CARD_CSS}
 ${ELECTION_CARD_CSS}

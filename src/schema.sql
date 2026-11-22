@@ -1951,3 +1951,11 @@ create table if not exists election_docs (
 	data jsonb not null,
 	updated_at timestamptz not null default now()
 );
+
+-- Roblox account linking (roblox.ts): one site account per Roblox account
+alter table users add column if not exists roblox_id bigint;
+alter table users add column if not exists roblox_username text;
+alter table users add column if not exists roblox_display_name text;
+alter table users add column if not exists roblox_linked_at timestamptz;
+alter table users add column if not exists roblox_show boolean not null default true;
+create unique index if not exists users_roblox_id on users (roblox_id) where roblox_id is not null;

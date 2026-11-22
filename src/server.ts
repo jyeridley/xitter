@@ -42,6 +42,7 @@ import { passkeySignInRoute, passkeysRoute } from "./passkeys";
 import { extraBadges, instanceCard } from "./badges";
 import { decorationFile, decorationsFor } from "./decorations";
 import { pronounsFor } from "./pronouns";
+import { robloxCallback, robloxConnect, robloxProfiles, robloxSettingsRoute } from "./roblox";
 import { decorationRoute } from "./decoration-settings";
 import { startScheduler } from "./scheduled";
 import { federationRoute, startFederation } from "./federation-routes";
@@ -112,7 +113,7 @@ const MIME: Record<string, string> = {
 // The client also calls outside services on its own (grok.com checkout, ads
 // measurement). Requests from the page may only reach this instance.
 const SETTINGS_PAGES = new Set(
-	["apps", "invites", "organisation", "decor", "theme", "decoration", "automation", "notices", "instances", "passkeys", "import", "migrate", "api", "notes/appeals", "email", "2fa", "merchant", "gifs", "post-details", "labels", "guests", "client"].map((s) => `/account/${s}`),
+	["apps", "invites", "organisation", "decor", "theme", "decoration", "automation", "notices", "instances", "passkeys", "import", "migrate", "api", "notes/appeals", "email", "2fa", "merchant", "gifs", "post-details", "labels", "guests", "client", "roblox"].map((s) => `/account/${s}`),
 );
 
 const PAGE_CSP = "connect-src 'self' blob: data:; font-src 'self'";
@@ -646,6 +647,14 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (p === "/account/post-details" && viewer) return classicDetailRoute(req, viewer);
 	if (p === "/account/labels" && viewer) return parodyLabelsRoute(req, viewer);
 	if (p === "/account/guests" && viewer) return guestVisibilityRoute(req, viewer);
+	if (p === "/account/roblox" && viewer) return robloxSettingsRoute(req, url, viewer);
+	if (p === "/i/roblox/connect") return robloxConnect(req, viewer ?? undefined);
+	if (p === "/i/roblox/callback" && req.method === "GET") return robloxCallback(url, viewer ?? undefined);
+	if (p === "/i/roblox/profiles" && req.method === "GET") {
+		const h = hit("read", `roblox:${viewer?.id ?? requestIp(req) ?? "unknown"}`);
+		if (!h.ok) return limitedResponse(h);
+		return robloxProfiles(url, viewer ?? undefined);
+	}
 	if (/^\/account\/ads(\/new|\/\d{1,19})?$/.test(p) && viewer) return adsRoute(req, viewer, p);
 	if (p === "/account/circle" && viewer) return circleRoute(req, viewer);
 	if (p === "/account/apps/developer" && viewer) return developerAppsRoute(req, viewer);

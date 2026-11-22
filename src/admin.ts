@@ -62,7 +62,7 @@ export type Action = { role: Role; run: (actor: Viewer, b: Body, req?: Request) 
 // so the audit filter offers them all, logged yet or not.
 export const AUDIT_ACTIONS = [
 	"ad_approve", "ad_reject", "ad_stop", "add_affiliate", "add_staff_note", "add_sticker", "archive_import", "article_visibility", "auto_suspend_name", "automod_second_chance",
-	"automod_strike", "backup_schedule", "block_oauth_app", "bulk_status", "bulk_strike", "compress_stored", "create_backup", "create_badge",
+	"automod_strike", "backup_schedule", "block_oauth_app", "bulk_status", "bulk_strike", "clear_roblox", "compress_stored", "create_backup", "create_badge",
 	"create_hashflag", "create_invites", "create_label", "create_org", "create_platform", "create_sticker_pack", "delete_account", "delete_backup",
 	"delete_badge", "delete_community_note", "delete_explore_card", "delete_hashflag", "delete_label", "delete_media", "delete_post", "delete_sticker",
 	"delete_sticker_pack", "delete_topic", "download_backup", "edit_profile", "end_hashflag", "escalate", "evasion_signup_refused", "expire_sanction",
@@ -412,7 +412,7 @@ const ACTIONS: Record<string, Action> = {
 		role: "support",
 		run: async (a, b) => {
 			const id = idOf(b.id);
-			const [u] = await sql`select ${userListCols}, ${allows(a.role, "invites") ? sql`u.invite_code` : sql`null::text as invite_code`}, u.bio, u.location, u.website, u.banner_url, u.based_in_override, u.country, u.signup_country, u.count_overrides, u.decor, u.notes_writer, u.never_sensitive, u.shadow_banned, u.org_badge_id::text, u.status_until, u.parody_label, u.label_id::text, u.instance, u.preferences->>'web_client' as web_client,
+			const [u] = await sql`select ${userListCols}, ${allows(a.role, "invites") ? sql`u.invite_code` : sql`null::text as invite_code`}, u.bio, u.location, u.website, u.banner_url, u.based_in_override, u.country, u.signup_country, u.count_overrides, u.decor, u.notes_writer, u.never_sensitive, u.shadow_banned, u.org_badge_id::text, u.status_until, u.parody_label, u.label_id::text, u.instance, u.preferences->>'web_client' as web_client, u.roblox_id::text as roblox_id, u.roblox_username, u.roblox_display_name, u.roblox_linked_at, u.roblox_show,
 				(select coalesce(json_agg(ub.badge_id::text order by ub.position), '[]') from user_badges ub where ub.user_id = u.id) as badge_ids,
 				(select count(*)::int from sessions s where s.user_id = u.id) as sessions,
 				(select count(*)::int from api_tokens t where t.user_id = u.id) as api_tokens,
@@ -612,6 +612,19 @@ const ACTIONS: Record<string, Action> = {
 			const rows = await sql`delete from api_tokens where user_id = ${id}::bigint returning id`;
 			await audit(a, "revoke_api_tokens", id, { tokens: rows.length });
 			return { tokens: rows.length };
+		},
+	},
+
+	clearRoblox: {
+		role: "support",
+		run: async (a, b) => {
+			const id = idOf(b.id);
+			await guard(a, id, true);
+			const [old] = await sql`select roblox_id::text as roblox_id, roblox_username from users where id = ${id}::bigint`;
+			if (!old?.roblox_id) return {};
+			await sql`update users set roblox_id = null, roblox_username = null, roblox_display_name = null, roblox_linked_at = null, roblox_show = true where id = ${id}::bigint`;
+			await audit(a, "clear_roblox", id, { roblox_id: old.roblox_id, username: old.roblox_username });
+			return {};
 		},
 	},
 
