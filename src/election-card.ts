@@ -134,6 +134,8 @@ export const ELECTION_SIDE_CSS = `#xitter-elside{flex:none;position:sticky;top:0
 #xitter-elside .xs-new .xs-btn{min-height:40px;width:100%;font-size:15px}
 #xitter-elside .xs-foot{padding:0 16px;display:flex;flex-wrap:wrap;gap:2px 12px}
 #xitter-elside .xs-foot a{color:inherit;text-decoration:none}#xitter-elside .xs-foot a:hover{text-decoration:underline}
+/* signed out on a phone the page sits in the guest home, whose feed tabs aren't the page's */
+html[data-xitter-election] [data-xs-hide]{display:none!important}
 [data-xs-row]{flex-direction:row!important;align-items:flex-start!important;max-width:none!important}
 @media (max-width:999px){[data-xs-row]{max-width:600px!important}}
 @media (max-width:1077px){#xitter-elside{width:290px;margin-left:20px}}
@@ -172,6 +174,8 @@ export const ELECTION_SIDE_SCRIPT = `(function(){
 	function place(){
 		var f=document.getElementById("xitter-pane"),el=document.getElementById("xitter-elside");
 		var here=location.pathname===PATH||location.pathname===PATH+"/";
+		document.documentElement.toggleAttribute("data-xitter-election",here);
+		if(here){var n=document.querySelector('[data-testid="TopNavBar"] nav');if(n&&!n.closest("[data-xs-hide]")){var e=n;while(e.parentElement&&e.parentElement.offsetHeight<100&&e.parentElement.getAttribute("data-testid")!=="TopNavBar")e=e.parentElement;e.setAttribute("data-xs-hide","")}}
 		if(!here||!f||f.hasAttribute("data-col")){if(el)el.remove();return}
 		if(!data){if(!asked){asked=true;fetch(PATH+"/api/side",{credentials:"same-origin"}).then(function(r){return r.json()}).then(function(d){data=d;place()},function(){asked=false})}return}
 		if(el&&el.previousElementSibling===f)return;
