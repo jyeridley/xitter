@@ -88,8 +88,13 @@ export async function evadedSuspension(email: string | null, ip: string | null |
 	if (!ip) return undefined;
 	const [retiredIp] = await sql`select user_id::text from retired_identities where kind = 'ip' and value = ${ip} and created_at > now() - interval '30 days'`;
 	if (retiredIp) return { user: retiredIp.user_id ?? "", by: "address" };
+	// an address staff sign in from is the staff's own network (home, office):
+	// someone suspended there says nothing about the next person signing up on it
 	const [byIp] = await sql`select u.id::text from login_events e join users u on u.id = e.user_id
-		where e.ip = ${ip} and e.created_at > now() - interval '30 days' and ${SUSPENDED_MEMBER} limit 1`;
+		where e.ip = ${ip} and e.created_at > now() - interval '30 days' and ${SUSPENDED_MEMBER}
+			and not exists (select 1 from login_events s join users su on su.id = s.user_id
+				where s.ip = ${ip} and s.created_at > now() - interval '30 days' and su.role is not null and su.status = 'active' and su.deactivated_at is null)
+		limit 1`;
 	return byIp ? { user: byIp.id, by: "address" } : undefined;
 }
 
