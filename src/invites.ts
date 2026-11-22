@@ -76,13 +76,15 @@ const CANONICAL_EMAIL = (column: ReturnType<typeof sql>) => sql`case when split_
 
 const SUSPENDED_MEMBER = sql`u.status = 'suspended' and u.deactivated_at is null and u.role is null`;
 
-export async function evadedSuspension(email: string, ip: string | null | undefined): Promise<{ user: string; by: "email" | "address" } | undefined> {
+export async function evadedSuspension(email: string | null, ip: string | null | undefined): Promise<{ user: string; by: "email" | "address" } | undefined> {
+	if (email) {
 	const [byEmail] = await sql`select u.id::text from users u where ${SUSPENDED_MEMBER} and u.email is not null
 		and ${CANONICAL_EMAIL(sql`u.email`)} = ${CANONICAL_EMAIL(sql`${email}::text`)} limit 1`;
 	if (byEmail) return { user: byEmail.id, by: "email" };
 	const [retiredEmail] = await sql`select user_id::text from retired_identities where kind = 'email'
 		and ${CANONICAL_EMAIL(sql`value`)} = ${CANONICAL_EMAIL(sql`${email}::text`)} limit 1`;
 	if (retiredEmail) return { user: retiredEmail.user_id ?? "", by: "email" };
+	}
 	if (!ip) return undefined;
 	const [retiredIp] = await sql`select user_id::text from retired_identities where kind = 'ip' and value = ${ip} and created_at > now() - interval '30 days'`;
 	if (retiredIp) return { user: retiredIp.user_id ?? "", by: "address" };
@@ -94,8 +96,9 @@ export async function evadedSuspension(email: string, ip: string | null | undefi
 // The checks sign-up makes before anything is stored, so the emailed-code step
 // (onboarding.ts) can refuse a bad form before sending a code.
 export async function checkSignup(f: SignupForm) {
-	const email = f.email.trim().toLowerCase();
-	if (!EMAIL.test(email) || email.length > 254) throw new SignupError("Enter a valid email address.");
+	// an email is optional: an account without one just has no password reset
+	const email = f.email.trim().toLowerCase() || null;
+	if (email && (!EMAIL.test(email) || email.length > 254)) throw new SignupError("Enter a valid email address.");
 	const screenName = f.screenName.trim().replace(/^@/, "");
 	const name = looksBlank(f.name) ? screenName : f.name.trim();
 	const problem = usernameProblem(screenName);
@@ -109,7 +112,7 @@ export async function checkSignup(f: SignupForm) {
 	if (f.password.length > 256) throw new SignupError("Passwords are at most 256 characters.");
 	if ((await getSetting("signup_mode")) === "closed") throw new SignupError("Sign-up is closed on this instance.");
 	if ((await sql`select 1 from users where lower(screen_name) = lower(${screenName})`).length) throw new SignupError("That username is taken.");
-	const [owner] = await sql`select deactivated_at from users where lower(email) = ${email}`;
+	const [owner] = email ? await sql`select deactivated_at from users where lower(email) = ${email}` : [];
 	if (owner?.deactivated_at) throw new SignupError("That email belongs to a deactivated account. Sign in to it to restore it, or ask this instance's staff to delete it.");
 	if (owner) throw new SignupError("That email is already used by another account.");
 	const evaded = await evadedSuspension(email, f.ip);
@@ -136,7 +139,7 @@ export async function signUp(
 	await sql.begin(async (tx) => {
 		const [taken] = await tx`select 1 from users where lower(screen_name) = lower(${screenName})`;
 		if (taken) throw new SignupError("That username is taken.");
-		const [mailTaken] = await tx`select 1 from users where lower(email) = ${email}`;
+		const [mailTaken] = email ? await tx`select 1 from users where lower(email) = ${email}` : [];
 		if (mailTaken) throw new SignupError("That email is already used by another account.");
 		// with open sign-up a code is optional, but one that is given must be good
 		const [invite] =

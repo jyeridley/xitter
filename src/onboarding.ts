@@ -76,43 +76,6 @@ function codeLength(messages: Message[], length: number): Message[] {
 	return without(messages, ["Didn't receive a code? Retry in  "], 25739);
 }
 
-// The setup screen has name, username and password. Email goes under the name:
-// a copy of the name block (label, input, error slot) with its texts changed.
-function withEmailField(messages: Message[]): Message[] {
-	const [, root] = messages[0];
-	const text = (p: number): string | undefined => (root.props[p]?.[0] === 0 ? root.props[p][1] : undefined);
-	const parentOf = new Map<number, number>();
-	root.els.forEach((e: any, i: number) => e.children.forEach((c: number) => parentOf.set(c, i)));
-	const input = root.els.findIndex((e: any) => e.props.has(17392) && text(e.props.get(17392)) === "name");
-	const block = parentOf.get(input);
-	const holder = block === undefined ? undefined : parentOf.get(block);
-	if (input < 0 || block === undefined || holder === undefined) throw new Error("setup screen: no name field to copy");
-	const swap: Record<string, string> = { "Name *": "Email *", name: "email", "Display name": "Email" };
-	const copies = new Map<number, number>();
-	const copy = (i: number): number => {
-		if (copies.has(i)) return copies.get(i)!;
-		const old = root.els[i];
-		const props = new Map<number, number>(old.props);
-		for (const [k, p] of props) {
-			const t = text(p);
-			if (t !== undefined && t in swap) {
-				root.props.push([0, swap[t]]);
-				props.set(k, root.props.length - 1);
-			}
-		}
-		const fresh = { ...old, props, children: [] as number[] };
-		root.els.push(fresh);
-		const at = root.els.length - 1;
-		copies.set(i, at);
-		fresh.children = old.children.map(copy);
-		return at;
-	};
-	const at = copy(block);
-	const siblings = root.els[holder].children;
-	siblings.splice(siblings.indexOf(block) + 1, 0, at);
-	return messages;
-}
-
 function withLegalNote(messages: Message[], source: Message[]): Message[] {
 	const [, root] = messages[0];
 	const [, from] = source[0];
@@ -177,7 +140,8 @@ const templates = {
 	code: codeLength(without(await load("code"), ["Send again"], 7140), INVITE_LENGTH),
 	// the authenticator code at sign-in: six digits
 	twoFactor: codeLength(without(await load("code"), ["Send again"], 7140), 6),
-	setup: withLegalNote(withEmailField(await load("setup")), await load("password")),
+	// no email on sign-up: name, username and password are all it asks (Jye)
+	setup: withLegalNote(await load("setup"), await load("password")),
 	success: await load("success"),
 	passkey: await load("passkey"),
 };
@@ -363,7 +327,7 @@ export async function onboarding(req: Request, path: string): Promise<Response |
 		// doesn't have (email) was never seen
 		const fieldOf = (e: Error) => (/email/i.test(e.message) ? "message" : /password/i.test(e.message) ? "password" : /name/i.test(e.message) && !/user/i.test(e.message) ? "name" : /username/i.test(e.message) ? "username" : "message");
 		// with mail set up, the address is proven first: the checked form waits for the code
-		if (mailEnabled()) {
+		if (mailEnabled() && String(f.email ?? "").trim()) {
 			const given = { code: s.code, screenName: String(f.username ?? s.username), name: String(f.name ?? ""), password: String(f.password ?? ""), email: String(f.email ?? ""), ip: requestIp(req) };
 			let checked: Awaited<ReturnType<typeof checkSignup>>;
 			try {
