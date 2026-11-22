@@ -249,7 +249,9 @@ const GUEST_OPERATIONS = new Set([
 	"UserByScreenName", "UserByRestId", "UsersByRestIds", "UserResultByScreenNameQuery",
 	"UserTweets", "UserTweetsAndReplies", "UserMedia", "UserHighlightsTweets",
 	"TweetDetail", "TweetResultByRestId", "TweetResultsByRestIds", "ProfileSpotlightsQuery",
-	"UserOriginalsTimeline", "UserSportsProfile", "HomeTimeline", "HomeLatestTimeline", "useStoryTopicQuery", "ExploreSidebar", "NflScoresSidebarFollow", "SportsLeagueFollow", "TopicToFollowSidebar",
+	"UserOriginalsTimeline", "UserSportsProfile", "HomeTimeline", "HomeLatestTimeline",
+	// the home tabs signed out: All and Government (lists.ts), and search
+	"PinnedTimelines", "ListLatestTweetsTimeline", "ListRankedTweetsTimeline", "ListByRestId", "SearchTimeline", "useStoryTopicQuery", "ExploreSidebar", "NflScoresSidebarFollow", "SportsLeagueFollow", "TopicToFollowSidebar",
 ]);
 
 export const guestViewer = (): Viewer => ({ id: GUEST_ID, screen_name: "", name: "", bio: "", location: "", avatar_url: null, banner_url: null, verified_type: null, status: "active", role: null, created_at: new Date(0), csrf: "", token: "" });
@@ -257,7 +259,10 @@ export const guestViewer = (): Viewer => ({ id: GUEST_ID, screen_name: "", name:
 const guestPage = (p: string) => p === "/home" || !RESERVED_PATHS.has(p.split("/")[1]?.toLowerCase() ?? "") && /^\/[A-Za-z0-9_]{1,15}(?:\/(?:status\/\d{1,19}(?:\/(?:photo|video)\/\d)?|with_replies|media|highlights))?\/?$/.test(p);
 const RESERVED_PATHS = new Set(["home", "explore", "notifications", "messages", "settings", "i", "compose", "search", "login", "logout", "signup", "account", "admin", "abs", "api", "media", "public", "jobs", "tos", "privacy"]);
 
-async function guestApi(url: URL): Promise<Response> {
+async function guestApi(req: Request, url: URL): Promise<Response> {
+	// signed-out reading, per address: the 1 GB box serves it
+	const h = hit("read", `guest:${requestIp(req) ?? "unknown"}`);
+	if (!h.ok) return limitedResponse(h);
 	if (url.pathname.endsWith("/1.1/hashflags.json")) return Response.json(await hashflagsJson());
 	const parts = url.pathname.split("/").filter(Boolean);
 	const name = parts.includes("graphql") ? parts[parts.length - 1] : undefined;
@@ -277,7 +282,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	// the client act as a guest and stop sending its csrf header.
 	if (!viewer && url.pathname.endsWith("/1.1/guest/activate.json")) return Response.json({ guest_token: "1" });
 	if (!viewer && settings().operations.guest_reading && req.method === "POST" && url.pathname.endsWith("/1.1/graphql/app_context.json")) return new Response(null, { status: 204 });
-	if (!viewer && settings().operations.guest_reading && req.method === "GET") return guestApi(url);
+	if (!viewer && settings().operations.guest_reading && req.method === "GET") return guestApi(req, url);
 	if (!viewer) return apiError(401, 32, "Could not authenticate you.");
 	const source = await platformSource(req);
 	if (source === null) return apiError(401, 32, "Invalid or revoked client token.");

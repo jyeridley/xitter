@@ -15,12 +15,14 @@ function homeModuleId(text: string): string | undefined {
 }
 
 function unguardedHome(text: string, id: string): { lazyModule: string; lazyFn: string } | undefined {
-	const start = text.indexOf(`${id}(e,t,n){`);
-	if (start < 0) return undefined;
-	const body = text.slice(start, start + 4000);
+	// the module's require is its third parameter: n in older builds, r in newer
+	const head = new RegExp(`[,{]${id}\\(e,t,([\\w$]+)\\)\\{`).exec(text);
+	if (!head) return undefined;
+	const req = head[1];
+	const body = text.slice(head.index, head.index + 4000);
 	const wrap = /\(0,([\w$]+)\.v\)\(\(0,([\w$]+)\.([\w$]+)\)\(([\w$]+)\)\)/.exec(body);
 	if (!wrap) return undefined;
-	const lazy = new RegExp(`[,\\s]${esc(wrap[2])}=n\\((\\d{1,9})\\)`).exec(body);
+	const lazy = new RegExp(`[,\\s]${esc(wrap[2])}=${esc(req)}\\((\\d{1,9})\\)`).exec(body);
 	return lazy ? { lazyModule: lazy[1], lazyFn: wrap[3] } : undefined;
 }
 
