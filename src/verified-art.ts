@@ -14,10 +14,13 @@ import { readFileSync } from "node:fs";
 const PUBLIC_DIR = process.env.PUBLIC_DIR ?? "public";
 export const VERIFIED_ART = /^verified-(blue|gold|grey)\.webp$/;
 
+// the check after a name, and the big one on the "Verified account" sheet
+// (X shows its own blue rosette there; gold and grey have none of their own)
 const CHECK = 'svg[data-testid="icon-verified"]';
+const SHEET = 'svg[data-testid="verificationBadge"]';
 const GOLD = ":has(linearGradient)";
 const GREY = ':has(path[fill="#829aab" i])';
-const PICK = { gold: `${CHECK}${GOLD}`, grey: `${CHECK}${GREY}`, blue: `${CHECK}:not(${GOLD}):not(${GREY})` };
+const pick = (svg: string) => ({ gold: `${svg}${GOLD}`, grey: `${svg}${GREY}`, blue: `${svg}:not(${GOLD}):not(${GREY})` });
 
 function art(type: string): string | null {
 	try {
@@ -28,15 +31,22 @@ function art(type: string): string | null {
 	}
 }
 
+// The art fills its square; X's rosette sits inside its box with room
+// around it. At 85% and centred the tilted square looks the same size as the
+// rosette did. A little room either side keeps it off the name and off an
+// affiliate's badge after it; overflow stays visible so its corners never clip.
+const SIZE = "85%";
+
 export function verifiedArtCss(): string {
-	return (["blue", "gold", "grey"] as const)
-		.map((t) => {
-			const url = art(t);
-			return url
-				? `${PICK[t]}{background:url("${url}") center/contain no-repeat!important;color:transparent!important;fill:transparent!important}${PICK[t]}>*{visibility:hidden!important}`
-				: "";
-		})
-		.join("");
+	const rules = (["blue", "gold", "grey"] as const).map((t) => {
+		const url = art(t);
+		if (!url) return "";
+		const sel = [pick(CHECK)[t], pick(SHEET)[t]];
+		return `${sel.join(",")}{background:url("${url}") center/${SIZE} no-repeat!important;color:transparent!important;fill:transparent!important;overflow:visible!important}` +
+			`${sel.map((s) => `${s}>*`).join(",")}{visibility:hidden!important}` +
+			`${pick(CHECK)[t]}{margin-inline-start:.16em!important;margin-inline-end:.12em!important}`;
+	});
+	return rules.join("");
 }
 
 export const verifiedArtScript = () => {
