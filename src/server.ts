@@ -210,7 +210,9 @@ async function serveClient(req: Request, pathname: string): Promise<Response> {
 	// each encoding is its own representation, with its own tag
 	const encoding = acceptedEncoding(req);
 	const etag = `"${hash}${encoding ? `-${encoding}` : ""}"`;
-	const headers: Record<string, string> = { "content-type": type, "cache-control": "no-cache", etag, vary: "accept-encoding" };
+	// no-cache: browsers revalidate, because our patches can change a file without renaming it.
+	// cdn-cache-control: Cloudflare should serve from the edge instead of revalidating origin every time.
+	const headers: Record<string, string> = { "content-type": type, "cache-control": "no-cache", "cdn-cache-control": "public, max-age=86400, stale-while-revalidate=604800", etag, vary: "accept-encoding" };
 	if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
 	if (!encoding) return new Response(new Uint8Array(body), { headers });
 	return new Response(await compressedFile(body, encoding), { headers: { ...headers, "content-encoding": encoding } });
@@ -440,6 +442,11 @@ async function route(req: Request): Promise<Response | undefined> {
 	rememberIp(req, server.requestIP(req)?.address);
 	const url = new URL(req.url);
 	const p = url.pathname;
+	// old address: send rwl.xitter.space to the main domain, same path
+	if ((req.headers.get("host") ?? "").toLowerCase().split(":")[0] === "rwl.xitter.space") {
+		const to = `https://bs.xitter.space${p}${url.search}`;
+		return new Response(null, { status: req.method === "GET" || req.method === "HEAD" ? 301 : 308, headers: { location: to } });
+	}
 	// for Docker's health check (Dockerfile): the server answers and reaches its database
 	if (p === "/healthz") {
 		const db = await Promise.race([sql`select 1`.then(() => true, () => false), Bun.sleep(3000).then(() => false)]);

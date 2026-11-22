@@ -642,7 +642,7 @@ const ACTIONS: Record<string, Action> = {
 		run: async (a, b) => {
 			const screenName = String(b.screen_name ?? "").trim().replace(/^@/, "");
 			const name = String(b.name ?? "").trim() || screenName;
-			if (!/^[A-Za-z0-9_]{4,15}$/.test(screenName)) throw new AdminError("Handles are 4 to 15 letters, digits or underscores.");
+			if (!/^[A-Za-z0-9_]{3,15}$/.test(screenName)) throw new AdminError("Handles are 3 to 15 letters, digits or underscores.");
 			if (superadminNameHere(screenName)) throw new AdminError("That handle is reserved.");
 			const [taken] = await sql`select 1 from users where lower(screen_name) = lower(${screenName})`;
 			if (taken) throw new AdminError("That handle is taken.");

@@ -53,14 +53,14 @@ export class SignupError extends Error {}
 export function usernameProblem(name: string): string | null {
 	if (/[^A-Za-z0-9_]/.test(name)) return "Usernames can only have letters, digits and underscores.";
 	if (name.length > 15) return `Usernames are at most 15 characters; this one has ${name.length}.`;
-	if (name.length < 4) return "Usernames are at least 4 characters.";
+	if (name.length < 3) return "Usernames are at least 3 characters.";
 	return null;
 }
 
 // for the check while typing: same rules as signUp below
 export async function usernameState(raw: string): Promise<"available" | "taken" | "invalid"> {
 	const screenName = raw.trim().replace(/^@/, "");
-	if (!/^[A-Za-z0-9_]{4,15}$/.test(screenName)) return "invalid";
+	if (!/^[A-Za-z0-9_]{3,15}$/.test(screenName)) return "invalid";
 	if (isReserved(screenName)) return "taken";
 	const [taken] = await sql`select 1 from users where lower(screen_name) = lower(${screenName})`;
 	return taken || (await handleHeld(screenName)) ? "taken" : "available";
