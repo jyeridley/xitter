@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 // The HTML page that boots the client, built from the pinned build snapshot.
 // Everything about the signed-in account is ours.
 
@@ -405,6 +406,18 @@ return window.__xitterTabsC=Tabs};`;
 const impersonating = (user: User | null) => ((user as Viewer | null)?.impersonator ? "<style>#xitter-impersonating{position:fixed;z-index:2147483647;left:50%;bottom:16px;transform:translateX(-50%);max-width:calc(100% - 32px);padding:10px 16px;border-radius:9999px;background:#f4212e;color:#fff;font:700 14px/18px TwitterChirp,-apple-system,\"Segoe UI\",sans-serif;text-decoration:none;box-shadow:0 1px 2px rgba(0,0,0,.2),0 6px 16px rgba(0,0,0,.25)}@media (hover:hover){#xitter-impersonating:hover{background:#dc1e29}}</style>" : "");
 const impersonatingBanner = (user: User | null) => ((user as Viewer | null)?.impersonator ? `<a id="xitter-impersonating" href="/account/impersonate/exit">You're signed in as @${esc(user!.screen_name)} by @${esc((user as Viewer).impersonator_name ?? "")}. Go back to your account</a>` : "");
 
+// Cloudflare keeps a client file a day under its name, and our patches change
+// files without renaming them: the chunk addresses carry the server's commit, so
+// a deploy is new addresses and the edge fetches what we serve now
+const PATCH_VERSION = (() => {
+	try {
+		const head = readFileSync(".git/HEAD", "utf8").trim();
+		const sha = head.startsWith("ref: ") ? readFileSync(`.git/${head.slice(5)}`, "utf8").trim() : head;
+		if (/^[0-9a-f]{40}$/.test(sha)) return sha.slice(0, 10);
+	} catch {}
+	return Date.now().toString(36);
+})();
+
 export function shell(user: User | null, multi = false, inCommunity = false, educationFlags: Record<string, number> = {}, links: MenuLink[] = [], look: Look | null = null, accent: Accent = DEFAULT_ACCENT, paint?: BackgroundPaint, csrf?: string, flash?: string): string | undefined {
 	const theme = look?.kind === "painted" ? look.theme : null;
 	const clientTheme = theme ? themeForClient(theme) : null;
@@ -414,14 +427,14 @@ export function shell(user: User | null, multi = false, inCommunity = false, edu
 	let runtimeText = runtimes.get(build.sha);
 	if (runtimeText === undefined) {
 		if (runtimes.size > 8) runtimes.clear();
-		runtimes.set(build.sha, (runtimeText = patchText(runtime)));
+		runtimes.set(build.sha, (runtimeText = patchText(runtime).replace(/\)\[e\]\+"a\.js"/, `)[e]+"a.js?v=${PATCH_VERSION}"`)));
 	}
 	// the chat build's address is ours (the rest of the metadata stays as captured:
 	// the client decides from it where its csrf header goes)
 	const chatBuild = build.meta.xchatEmbedBuild;
 	const meta = { ...build.meta, ...(typeof chatBuild === "string" ? { xchatEmbedBuild: patchText(chatBuild) } : {}), sha: build.sha, isLoggedIn: !!user, userId: user?.id ?? null, hasMultiAccountCookie: !!user && multi, serverDate: Date.now() };
 	const scripts = build.scripts
-		.map((p) => `<script defer charset="utf-8" crossorigin="anonymous" src="${PUBLIC_ORIGIN}/abs${p}"></script>`)
+		.map((p) => `<script defer charset="utf-8" crossorigin="anonymous" src="${PUBLIC_ORIGIN}/abs${p}?v=${PATCH_VERSION}"></script>`)
 		.join("");
 	// an old build gets the page it came with: Xitter's CSS and scripts are written
 	// against the current client's markup and would only get in its way
