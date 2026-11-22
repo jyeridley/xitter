@@ -19,6 +19,7 @@ import { POST_CONTEXT_SCRIPT } from "./post-context";
 import { ERROR_SCRIPT } from "./errors";
 import { BADGES_SCRIPT } from "./badges";
 import { verifiedArtScript } from "./verified-art";
+import { GOV_FEED_SCRIPT } from "./gov-feed";
 import { DECOR_SCRIPT } from "./decor";
 import { DECORATIONS_SCRIPT } from "./decorations";
 import { THEME_SCRIPT } from "./themes/client";
@@ -328,6 +329,7 @@ ${signedIn ? MONEY_UI_SCRIPT : ""}
 ${POST_CONTEXT_SCRIPT}
 ${BADGES_SCRIPT}
 ${verifiedArtScript()}
+${GOV_FEED_SCRIPT}
 ${signedIn ? THEME_SCRIPT : ""}
 ${signedIn ? DECOR_SCRIPT : ""}
 ${DECORATIONS_SCRIPT}
@@ -390,6 +392,7 @@ function tab(label,on,go){return R.createElement("div",{key:label,role:"tab","ar
 return R.createElement("div",{ref:ref,role:"tablist",style:{display:"flex",position:"sticky",top:53,zIndex:2,borderBottom:"1px solid rgba(128,128,128,.25)",fontFamily:F,fontSize:15}},
 tab("For you",!latest,function(){if(latest&&st.toggle)st.toggle()}),
 tab("Following",latest,function(){if(!latest&&st.toggle)st.toggle()}),
+tab("Government",false,function(){p.history&&p.history.push("/i/lists/2")}),
 tab("All",false,function(){p.history&&p.history.push("/i/lists/1")}))}
 return window.__xitterTabsC=Tabs};`;
 

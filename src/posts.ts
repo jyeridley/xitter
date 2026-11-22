@@ -295,8 +295,9 @@ export type FeedItem = { id: string; post: PostRow; repost?: { by: User; created
 export type FeedQuery = {
 	viewerId: string;
 	// whose posts and reposts: everyone, the viewer plus accounts they follow, or one account
-	authors: { all: true } | { following: true } | { user: string } | { list: string } | { community: string };
-	replies: boolean;
+	authors: { all: true } | { following: true } | { user: string } | { list: string } | { community: string } | { gov: true };
+	// "self": replies only to the author's own posts (threads)
+	replies: boolean | "self";
 	kinds: "both" | "posts" | "reposts";
 	// only posts with attached media of this kind
 	media?: "any" | "photo" | "video";
@@ -342,11 +343,19 @@ export async function feed(q: FeedQuery): Promise<FeedItem[]> {
 				? sql`(f.reposter_id is null and f.post_id in (select id from posts where community_id = ${q.authors.community}::bigint))`
 			: "list" in q.authors
 				? sql`f.author_id in (select user_id from list_members where list_id = ${q.authors.list}::bigint)`
+			: "gov" in q.authors
+				? sql`f.author_id in (select id from users where verified_type in ('government', 'government_individual'))`
 				: "following" in q.authors
 					? sql`(f.author_id = ${q.viewerId}::bigint or f.author_id in (select followee_id from follows where follower_id = ${q.viewerId}::bigint))`
 					: sql`true`;
 	const kindFilter = q.kinds === "posts" ? sql`f.reposter_id is null` : q.kinds === "reposts" ? sql`f.reposter_id is not null` : sql`true`;
-	const replyFilter = q.onlyReplies ? sql`f.is_reply` : q.replies ? sql`true` : sql`not f.is_reply`;
+	const replyFilter = q.onlyReplies
+		? sql`f.is_reply`
+		: q.replies === "self"
+			? sql`(not f.is_reply or exists (select 1 from posts x where x.id = f.post_id and x.reply_to_user_id = x.user_id))`
+			: q.replies
+				? sql`true`
+				: sql`not f.is_reply`;
 	const articleFilter = q.articlesOnly ? sql`exists (select 1 from posts a where a.id = f.post_id and a.article_id is not null)` : sql`true`;
 	const mediaFilter = !q.media
 		? sql`true`
@@ -361,7 +370,7 @@ export async function feed(q: FeedQuery): Promise<FeedItem[]> {
 	// Circle posts the viewer isn't in would only drop out later and shorten the
 	// page; staff see them on profiles, not in their own timelines
 	const circleFilter = sql`exists (select 1 from posts x where x.id = f.post_id and ${home ? circleMember(q.viewerId, sql`x`) : circleSeen(q.viewerId, sql`x`)})`;
-	const hidden = home ? ("list" in q.authors || "community" in q.authors ? homeHidden(q.viewerId) : sql`${homeHidden(q.viewerId)} and ${listMuted(q.viewerId)}`) : profileHidden(q.viewerId);
+	const hidden = home ? ("list" in q.authors || "community" in q.authors || "gov" in q.authors ? homeHidden(q.viewerId) : sql`${homeHidden(q.viewerId)} and ${listMuted(q.viewerId)}`) : profileHidden(q.viewerId);
 	const rows = q.after
 		? await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and ${articleFilter} and ${communityFilter} and ${circleFilter} and ${hidden} and f.item_id > ${q.after}::bigint
 			order by f.item_id asc limit ${q.limit}`

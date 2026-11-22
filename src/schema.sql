@@ -1941,3 +1941,6 @@ alter table ads add column if not exists paused_at timestamptz;
 alter table ads add column if not exists name text;
 alter table ads add column if not exists existing_post boolean not null default false;
 create index if not exists ads_post_idx on ads (post_id) where post_id is not null;
+
+-- lists.ts GOV_ID: the Government feed's authors, the grey-badge accounts
+create index if not exists users_gov_idx on users (id) where verified_type in ('government', 'government_individual');

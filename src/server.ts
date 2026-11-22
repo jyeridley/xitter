@@ -571,6 +571,8 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (/^\/(settings|i\/flow)\/.*passkey/i.test(p) && !p.startsWith("/settings/xitter/")) return Response.redirect("/settings/xitter/passkeys", 302);
 	// the built-in "All" list (lists.ts)
 	if (p === "/all") return Response.redirect("/i/lists/1", 302);
+	// and the built-in "Government" list
+	if (p === "/government" || p === "/i/government") return Response.redirect("/i/lists/2", 302);
 	if ((p === "/login" && !loadBuild()?.build.stateBase) || p === "/signup" || p.startsWith("/i/flow/")) {
 		const headers = new Headers({ location: "/?signin=1" });
 		const code = url.searchParams.get("code");
