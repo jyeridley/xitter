@@ -95,6 +95,7 @@ import { expireShopCheckmarks } from "./money-shop";
 import { restrictedPage, restrictedRefuses } from "./restricted-page";
 import { VERIFIED_ART } from "./verified-art";
 import { electionRoute } from "./election";
+import { marketsRoute } from "./markets";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -257,7 +258,7 @@ const GUEST_OPERATIONS = new Set([
 
 export const guestViewer = (): Viewer => ({ id: GUEST_ID, screen_name: "", name: "", bio: "", location: "", avatar_url: null, banner_url: null, verified_type: null, status: "active", role: null, created_at: new Date(0), csrf: "", token: "" });
 
-const guestPage = (p: string) => p === "/home" || p === "/i/electionnov22" || /^\/(?:search|explore(?:\/tabs\/[\w-]{1,30})?|i\/lists\/\d{1,19}|hashtag\/[^/]{1,100})\/?$/.test(p) || !RESERVED_PATHS.has(p.split("/")[1]?.toLowerCase() ?? "") && /^\/[A-Za-z0-9_]{1,50}(?:\/(?:status\/\d{1,19}(?:\/(?:photo|video)\/\d)?|with_replies|media|highlights))?\/?$/.test(p);
+const guestPage = (p: string) => p === "/home" || p === "/i/electionnov22" || p === "/i/markets" || /^\/(?:search|explore(?:\/tabs\/[\w-]{1,30})?|i\/lists\/\d{1,19}|hashtag\/[^/]{1,100})\/?$/.test(p) || !RESERVED_PATHS.has(p.split("/")[1]?.toLowerCase() ?? "") && /^\/[A-Za-z0-9_]{1,50}(?:\/(?:status\/\d{1,19}(?:\/(?:photo|video)\/\d)?|with_replies|media|highlights))?\/?$/.test(p);
 const RESERVED_PATHS = new Set(["home", "explore", "notifications", "messages", "settings", "i", "compose", "search", "login", "logout", "signup", "account", "admin", "abs", "api", "media", "public", "jobs", "tos", "privacy"]);
 
 async function guestApi(req: Request, url: URL): Promise<Response> {
@@ -604,6 +605,11 @@ async function route(req: Request): Promise<Response | undefined> {
 		return Response.redirect("/account/suspended", 302);
 	}
 	if (p === "/account/suspended" && req.method === "GET") return Response.redirect("/home", 302);
+	// TradeX, the play stock market (markets.ts), framed in the client like the election page
+	{
+		const markets = await marketsRoute(req, p, viewer, { clientShell: !loadBuild()?.build.stateBase && (!!viewer || settings().operations.guest_reading), ip: requestIp(req) ?? "unknown" });
+		if (markets) return markets;
+	}
 	// Jye's election night page, its own page outside the client (election.ts)
 	{
 		const election = await electionRoute(req, p, viewer);

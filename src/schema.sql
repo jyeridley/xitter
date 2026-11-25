@@ -1959,3 +1959,78 @@ alter table users add column if not exists roblox_display_name text;
 alter table users add column if not exists roblox_linked_at timestamptz;
 alter table users add column if not exists roblox_show boolean not null default true;
 create unique index if not exists users_roblox_id on users (roblox_id) where roblox_id is not null;
+
+-- TradeX, the play stock market at /i/markets (markets.ts): companies staff
+-- list, prices that drift every two seconds, and each account's play cash
+create table if not exists market_companies (
+	id bigserial primary key,
+	name text not null,
+	ticker text not null unique,
+	logo bytea,
+	logo_type text,
+	logo_v int not null default 0,
+	price numeric(16,2) not null,
+	prev_close numeric(16,2) not null,
+	shares bigint not null,
+	volume bigint not null default 0,
+	listed_at timestamptz not null default now(),
+	suspended boolean not null default false
+);
+create table if not exists market_history (
+	id bigserial primary key,
+	company_id bigint not null references market_companies(id) on delete cascade,
+	t timestamptz not null default clock_timestamp(),
+	price numeric(16,2) not null
+);
+create index if not exists market_history_company on market_history (company_id, id desc);
+create table if not exists market_index (
+	id bigserial primary key,
+	t timestamptz not null default clock_timestamp(),
+	value double precision not null
+);
+create table if not exists market_headlines (
+	id bigserial primary key,
+	text text not null,
+	cat text not null,
+	ticker text,
+	breaking boolean not null default false,
+	created_at timestamptz not null default now()
+);
+create table if not exists market_accounts (
+	user_id bigint primary key references users(id) on delete cascade,
+	cash numeric(18,2) not null default 5000,
+	created_at timestamptz not null default now()
+);
+create table if not exists market_holdings (
+	user_id bigint not null references users(id) on delete cascade,
+	company_id bigint not null references market_companies(id) on delete cascade,
+	qty double precision not null,
+	cost double precision not null,
+	primary key (user_id, company_id)
+);
+create table if not exists market_txns (
+	id bigserial primary key,
+	user_id bigint not null references users(id) on delete cascade,
+	created_at timestamptz not null default now(),
+	side text not null,
+	ticker text not null,
+	qty double precision not null,
+	price numeric(16,2) not null,
+	total numeric(18,2) not null
+);
+create index if not exists market_txns_user on market_txns (user_id, id desc);
+create table if not exists market_logs (
+	id bigserial primary key,
+	created_at timestamptz not null default now(),
+	action text not null
+);
+create table if not exists market_events (
+	id bigserial primary key,
+	created_at timestamptz not null default now(),
+	name text not null,
+	detail text not null
+);
+create table if not exists market_state (
+	key text primary key,
+	value double precision not null
+);

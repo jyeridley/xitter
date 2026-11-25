@@ -13,6 +13,7 @@ import { articlesByIds } from "./articles";
 import { blockedFor, federatedHiddenFor, hasMutedWord, isBlockedEitherWay, mutedFor, outOfView, protectedFor, replyLimited, shadowedFor, suspendedFor } from "./blocks";
 import { staffViewer } from "./staff-access";
 import { electionLinkCard, isElectionLink } from "./election-card";
+import { isMarketLink, marketLinkCard } from "./markets";
 import { fetchPreview, linkCard, linksIn, previewable, previewsFor, statusLinkOf } from "./links";
 import { paymentCards, rewardLike } from "./money";
 import { mediaForPosts } from "./media";
@@ -184,6 +185,12 @@ async function hydrate(viewerId: string, posts: PostRow[], quotes = true): Promi
 		if (p.linkCard || p.poll || p.conversationCard || p.quote_id || p.quoted || p.article_id || p.media?.length) continue;
 		const link = linksIn(p.text).map((l) => l.url).filter(isElectionLink).at(-1);
 		if (link) p.linkCard = await electionLinkCard(link).catch(() => undefined);
+	}
+	// a link to TradeX or one of its companies: its card (markets.ts)
+	for (const p of posts) {
+		if (p.linkCard || p.poll || p.conversationCard || p.quote_id || p.quoted || p.article_id || p.media?.length) continue;
+		const link = linksIn(p.text).map((l) => l.url).filter(isMarketLink).at(-1);
+		if (link) p.linkCard = await marketLinkCard(link).catch(() => undefined);
 	}
 	// a payment's link put in by one of its sides, or a request's by its
 	// requester, becomes its card (money.ts)

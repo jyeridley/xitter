@@ -41,7 +41,8 @@ export function patchGuestHome(text: string): string {
 	// Jye's election page (election.ts) signed out: the guest home's frame, side
 	// bars and all, which tidy.ts covers with the page in the main column
 	const electionEl = `(0,${jsx}.jsx)(${route[1]}.Route,{exact:!0,path:"/i/electionnov22",render:e=>window.__XITTER_GUEST_HOME__?(0,${jsx}.jsx)(${guestHome},{...e}):(0,${jsx}.jsx)(${redirectNs}.A,{to:"/"})},"election_lo")`;
-	return text.replace(whole, `${routeEl},${electionEl}`);
+	const marketsEl = `(0,${jsx}.jsx)(${route[1]}.Route,{exact:!0,path:"/i/markets",render:e=>window.__XITTER_GUEST_HOME__?(0,${jsx}.jsx)(${guestHome},{...e}):(0,${jsx}.jsx)(${redirectNs}.A,{to:"/"})},"markets_lo")`;
+	return text.replace(whole, `${routeEl},${electionEl},${marketsEl}`);
 }
 
 const VIEWER_GUARD = /if\(!([\w$]+)\)throw Error\("RichHomeTimeline: useModule requires a viewerUserId"\)/;
@@ -73,11 +74,13 @@ function tick(){var p=location.pathname,h=p==="/"||p==="/home";if(h!==last){last
 const BOOKMARKS_ROUTE = /\(0,([\w$]+)\.jsx\)\(([\w$]+)\.Route,\{component:([\w$]+),exact:!0,path:"\/i\/bookmarks"\},"\/i\/bookmarks"\)/;
 
 export function patchElectionRoute(text: string): string {
-	if (text.includes('"/i/electionnov22"')) return text;
 	const m = BOOKMARKS_ROUTE.exec(text);
 	if (!m) return text;
 	const [whole, jsx, router, component] = m;
-	return text.replace(whole, `(0,${jsx}.jsx)(${router}.Route,{component:${component},exact:!0,path:"/i/electionnov22"},"/i/electionnov22"),${whole}`);
+	// and TradeX (markets.ts) the same way
+	const add = ["/i/electionnov22", "/i/markets"].filter((p) => !text.includes(`"${p}"`));
+	if (!add.length) return text;
+	return text.replace(whole, `${add.map((p) => `(0,${jsx}.jsx)(${router}.Route,{component:${component},exact:!0,path:"${p}"},"${p}")`).join(",")},${whole}`);
 }
 
 // Signed out, search, lists and Explore are the signed-in client's own screens

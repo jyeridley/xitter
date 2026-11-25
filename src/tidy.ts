@@ -97,6 +97,8 @@ const CIRCLE = "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 
 const TONE = "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 1.8v14.4a7.2 7.2 0 0 0 0-14.4z";
 const HISTORY = "M480-120q-138 0-240.5-91.5T122-440h82q14 104 92.5 172T480-200q117 0 198.5-81.5T760-480q0-117-81.5-198.5T480-760q-69 0-129 32t-101 88h110v80H120v-240h80v94q51-64 124.5-99T480-840q75 0 140.5 28.5t114 77q48.5 48.5 77 114T840-480q0 75-28.5 140.5t-77 114q-48.5 48.5-114 77T480-120Zm112-192L440-464v-216h80v184l128 128-56 56Z";
 const GIF = "M120-120v-720h720v720H120Zm80-80h560v-560H200v560Zm80-80h400L560-520 440-360l-80-100-80 180Zm40-280q25 0 42.5-17.5T380-700q0-25-17.5-42.5T320-760q-25 0-42.5 17.5T260-700q0 25 17.5 42.5T320-660Z";
+// a line going up: TradeX
+const MARKETS_ICON = "M16 6l2.29 2.29-4.88 4.88-4-4L2 16.59 3.41 18l6-6 4 4 6.3-6.29L22 12V6z";
 const CAT = "M5 3.5 9.2 7.6A9 9 0 0 1 12 7.2a9 9 0 0 1 2.8.4L19 3.5V12a7 7 0 0 1-14 0V3.5Zm4.5 8.3a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm5 0a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Z";
 // four tiles: the admin panel
 const PANEL = "M3 3h8v10H3V3zm2 2v6h4V5H5zm8-2h8v6h-8V3zm2 2v2h4V5h-4zM3 15h8v6H3v-6zm2 2v2h4v-2H5zm8-4h8v8h-8v-8zm2 2v4h4v-4h-4z";
@@ -114,6 +116,8 @@ export async function menuLinks(userId: string): Promise<MenuLink[]> {
 		links.push({ href: "/account/money", text: "Equicoins", description: "Send Equicoins to other accounts.", icon: MONEY_ICON, iconOn: MONEY_ICON_FILLED, where: "nav" });
 		links.push({ href: "/account/merchant", text: "Equicoins", description: "Merchant mode: payments to your organisation read as purchases.", icon: MONEY_ICON, where: "settings" });
 	}
+	// TradeX, the play stock market (markets.ts)
+	links.push({ href: "/i/markets/embed", text: "Markets", description: "Trade on the play stock market.", icon: MARKETS_ICON, where: "nav" });
 	if (s.ads.enabled) links.push({ href: "/account/ads", text: "Ads Manager", description: "Run ads with Equicoins.", icon: MEGAPHONE, viewBox: "0 -960 960 960", where: "nav" });
 	links.push({ href: "/account/apps", text: "Connected apps", description: "Review and remove apps authorized to use your account.", icon: CODE, viewBox: "0 -960 960 960", where: "settings" });
 	if (s.invite_quota.enabled && s.signup_mode === "invite")
@@ -272,8 +276,8 @@ export const TIDY_SCRIPT = `(function(){
 	// the side bar's own entries (where "nav") open on a path of the client's
 	// own instead, which it answers with its not-found page in the main column
 	// (and Jye's election page, election.ts: its own pages under it stay its own)
-	var FULL={"/i/xmoney":"/account/money","/i/ads":"/account/ads","/i/circles":"/account/circle","/i/electionnov22":"/i/electionnov22/embed"};
-	var WHOLE={"/i/electionnov22":1};
+	var FULL={"/i/xmoney":"/account/money","/i/ads":"/account/ads","/i/circles":"/account/circle","/i/electionnov22":"/i/electionnov22/embed","/i/markets":"/i/markets/embed"};
+	var WHOLE={"/i/electionnov22":1,"/i/markets":1};
 	// and the pages under it (a payment: /i/xmoney/p/<id>)
 	function fullOf(p){for(var k in FULL)if(p===k||(!WHOLE[k]&&p.indexOf(k+"/")===0))return FULL[k]+p.slice(k.length)}
 	function full(p){for(var k in FULL)if(p===FULL[k]||p.indexOf(FULL[k]+"/")===0)return k+p.slice(FULL[k].length)}
@@ -298,13 +302,18 @@ export const TIDY_SCRIPT = `(function(){
 		var name=f.getAttribute("data-name"),d;
 		try{d=f.contentDocument}catch(e){}
 		if(!name||!d)return;
-		var h=[].find.call(document.querySelectorAll('h2[role="heading"]'),function(h){return h.hasAttribute("data-xitter-head")||h.textContent==="Not found"});
+		// (the election page and TradeX borrow the Bookmarks screen, whose header says so on a phone)
+		var borrowed=!!WHOLE[location.pathname];
+		var h=[].find.call(document.querySelectorAll('h2[role="heading"]'),function(h){return h.hasAttribute("data-xitter-head")||h.textContent==="Not found"||borrowed&&/^(All )?Bookmarks$/.test(h.textContent)&&h.getClientRects().length>0});
+		if(h&&borrowed){var row=h;for(var i=0;i<6&&row.parentElement;i++)row=row.parentElement;[].forEach.call(row.querySelectorAll('button[aria-label="Create a Folder"]'),function(b){b.style.visibility="hidden"})}
 		var bar=d.querySelector(".bar");
 		if(bar)bar.hidden=!!h;
-		if(!h)return;
+		// that screen draws its header a little after the frame has loaded
+		if(!h){if(borrowed&&(f.__tries=(f.__tries||0)+1)<20)setTimeout(function(){heading(f)},500);return}
 		h.setAttribute("data-xitter-head","");
 		// the text node itself, so the client still finds its own when it moves on
 		var leaf=[].find.call(h.querySelectorAll("span"),function(s){return !s.childElementCount&&s.firstChild&&s.firstChild.nodeType===3});
+		if(!leaf&&!h.childElementCount&&h.firstChild&&h.firstChild.nodeType===3)leaf=h;
 		if(leaf&&leaf.firstChild.nodeValue!==name)leaf.firstChild.nodeValue=name;
 	}
 	var since=0,paneObserver=null,paneFitFrame=0;
@@ -342,7 +351,7 @@ export const TIDY_SCRIPT = `(function(){
 			if(!d||!d.body)return;
 			var at=w.location.pathname+w.location.search;
 			// a form sent inside the frame can land outside our pages
-			if(w.location.pathname.indexOf("/account/")!==0&&w.location.pathname!=="/i/electionnov22/embed"){stopPaneFit();f.remove();go(at,true);return}
+			if(w.location.pathname.indexOf("/account/")!==0&&w.location.pathname!=="/i/electionnov22/embed"&&w.location.pathname!=="/i/markets/embed"){stopPaneFit();f.remove();go(at,true);return}
 			// a look saved on the theme page only reaches the client on a fresh load
 			if(w.location.pathname==="/account/theme"&&f.getAttribute("data-was")==="/account/theme"){location.reload();return}
 			f.setAttribute("data-was",w.location.pathname);
