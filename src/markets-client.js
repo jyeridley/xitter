@@ -244,8 +244,10 @@ function render(){
  var bar='<div class=bar>'+(S.page==='co'?'<a class=back href="?" data-go="list" aria-label="Back">←</a>':(!framed?'<a class=back href="/home" aria-label="'+esc(db.instance)+'">←</a>':''))+'<div><h1>'+esc(title)+'</h1>'+(S.page==='co'&&C(S.cid)?'<div class=sub>'+esc(C(S.cid).name)+'</div>':'<div class=sub>TradeX'+(db.me?' · '+fmt(db.me.cash)+' cash':'')+'</div>')+'</div></div>';
  var nav='<nav class=tabs>'+TABS.map(function(t){return '<a href="#" data-go="'+t[0]+'" class="'+(S.page===t[0]||(t[0]==='list'&&S.page==='co')?'on':'')+'">'+t[1]+'</a>'}).join('')+'</nav>';
  var body={dash:dash,list:list,co:coPage,acct:acct,admin:adminPage}[S.page]();
- var y=window.scrollY;
+ var y=window.scrollY,old=$('.bar'),hid=!!(old&&old.hidden);
  $('#app').innerHTML=bar+nav+body;
+ // the client's own header stands in for ours on a phone (tidy.ts)
+ if(hid)$('.bar').hidden=true;
  window.scrollTo(0,y);
  document.title=(S.page==='co'&&C(S.cid)?C(S.cid).ticker+' · '+C(S.cid).name:'Markets')+' · '+db.instance;
 }
