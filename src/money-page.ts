@@ -1,4 +1,4 @@
-// Equicoins pages (money.ts): the balance and activity at /account/money,
+// Money pages (money.ts): the balance and activity at /account/money,
 // opened from the side bar (tidy.ts); sending, requesting, a payment's and a
 // request's own page under it; and merchant mode at /account/merchant, in
 // Settings.
@@ -232,7 +232,7 @@ document.querySelectorAll("input[data-people]").forEach(function(input){
 const POST_ICON = "M23 3c-6.62-.1-10.38 2.421-13.05 6.03C7.29 12.61 6 17.331 6 22h2c0-1.007.07-2.012.19-3H12c4.1 0 7.48-3.082 7.94-7.054C22.79 10.147 23.17 6.359 23 3zm-7 8h-1.5v2H16c.63-.016 1.2-.08 1.72-.188C16.95 15.24 14.68 17 12 17H8.55c.57-2.512 1.57-4.851 3-6.78 2.16-2.912 5.29-4.911 9.45-5.187C20.95 8.079 19.9 11 16 11zM4 9V6H1V4h3V1h2v3h3v2H6v3H4z";
 const HEART = "M16.697 5.5c-1.222-.06-2.679.51-3.89 2.16l-.805 1.09-.806-1.09C9.984 6.01 8.526 5.44 7.304 5.5c-1.243.07-2.349.78-2.91 1.91-.552 1.12-.633 2.78.479 4.82 1.074 1.97 3.257 4.27 7.129 6.61 3.87-2.34 6.052-4.64 7.126-6.61 1.111-2.04 1.03-3.7.477-4.82-.561-1.13-1.666-1.84-2.908-1.91z";
 const tile = `<span class="tile" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="${MONEY_ICON}"/></svg></span>`;
-const HOME = { href: "/account/money", label: "Back to Equicoins" };
+const HOME = { href: "/account/money", label: "Back to Money" };
 const page = (req: Request, viewer: Viewer, title: string, body: string, status = 200, back = HOME) =>
 	accountPage({ req, viewer, status, title, back, css: CSS, head: `<script>addEventListener("DOMContentLoaded",function(){${SCRIPT}})</script>`, body });
 const who = (p: Party) => `<span class="who"><span>${esc(p.merchant?.name ?? p.name)}</span>${badges(p)}</span>`;
@@ -299,12 +299,12 @@ async function home(req: Request, viewer: Viewer, status = 200, notice = "", err
 					return head + i.html;
 				})
 				.join("\n")
-		: `<p class="empty">No activity yet.<br>Equicoins you send, receive and earn shows up here.</p>`;
+		: `<p class="empty">No activity yet.<br>Money you send, receive and earn shows up here.</p>`;
 	const likes = economy().like_cents;
 	return page(
 		req,
 		viewer,
-		"Equicoins",
+		"Money",
 		`<section class="hero" aria-label="Balance">${tile}<div class="label">Balance</div><div class="amount">${formatCents(balance)}</div>
 ${viewer.actor ? `<p class="dim">Only @${esc(viewer.screen_name)} can send money from this account.</p>` : `<div class="actions"><a class="pill primary" href="/account/money/send">Send</a><a class="pill" href="/account/money/request">Request</a>${settings().money_shop.enabled ? `<a class="pill" href="/account/money/shop">Shop</a>` : ""}</div>`}
 ${likes > 0 ? `<p class="dim" style="margin-top:12px">You earn ${likes < 100 ? `${likes}¢` : formatCents(likes)} for each like on your posts.</p>` : ""}</section>
@@ -397,7 +397,7 @@ ${
 <div class="field"><input id="note" name="note" maxlength="${NOTE_MAX}" placeholder=" " value="${esc(note)}"><label for="note">What's it for?</label></div>
 <label class="check">Share it in a post<input type="checkbox" name="share" value="1"></label>
 <button type="submit" class="pill primary wide">${q ? "Pay" : "Send"}</button>
-<p class="fine">Instant and free. ${esc(settings().instance_name)} Equicoins has no cash value.${
+<p class="fine">Instant and free. ${esc(settings().instance_name)} Money has no cash value.${
 	settings().money.feed ? ` Payments are posted publicly by <a href="/${esc(settings().money.feed)}">@${esc(settings().money.feed)}</a>, without your note.` : ""
 }</p>
 </form>`,
@@ -481,9 +481,9 @@ ${!q.payer && mine ? `<dt>Paid</dt><dd>${q.paidCount} time${q.paidCount === 1 ? 
 	);
 }
 
-// Settings > Equicoins: merchant mode, for gold organisations
+// Settings > Money: merchant mode, for gold organisations
 export async function merchantRoute(req: Request, viewer: Viewer): Promise<Response> {
-	if (!feature("money") || viewer.instance) return accountPage({ req, viewer, status: 404, title: "Equicoins", body: `<p>Equicoins isn't available on ${esc(settings().instance_name)}.</p>` });
+	if (!feature("money") || viewer.instance) return accountPage({ req, viewer, status: 404, title: "Money", body: `<p>Money isn't available on ${esc(settings().instance_name)}.</p>` });
 	let notice = "";
 	let error = "";
 	if (req.method === "POST") {
@@ -509,7 +509,7 @@ export async function merchantRoute(req: Request, viewer: Viewer): Promise<Respo
 	return accountPage({
 		req,
 		viewer,
-		title: "Equicoins",
+		title: "Money",
 		back: { href: "/account/", label: "Back to Xitter settings" },
 		css: CSS,
 		body: `<section class="settings">${tile}
@@ -529,14 +529,14 @@ ${
 	});
 }
 
-// The first time Equicoins opens, before anything else: what its money is. The
+// The first time Money opens, before anything else: what its money is. The
 // page asked for comes back once it's accepted.
 function disclaimer(req: Request, viewer: Viewer, back: string) {
-	const name = esc(`${settings().instance_name} Equicoins`);
+	const name = esc(`${settings().instance_name} Money`);
 	return page(
 		req,
 		viewer,
-		"Equicoins",
+		"Money",
 		`<section class="settings" style="padding:32px 16px">${tile}
 <h1>Welcome to ${name}</h1>
 <p><b>Disclaimer:</b> ${esc(disclaimerText())}</p>
@@ -549,7 +549,7 @@ function disclaimer(req: Request, viewer: Viewer, back: string) {
 
 export async function moneyRoute(req: Request, viewer: Viewer): Promise<Response> {
 	if (!feature("money") || viewer.instance)
-		return accountPage({ req, viewer, status: 404, title: "Equicoins", body: `<h1>Equicoins</h1><p>Equicoins isn't available on ${esc(settings().instance_name)}.</p>` });
+		return accountPage({ req, viewer, status: 404, title: "Money", body: `<h1>Money</h1><p>Money isn't available on ${esc(settings().instance_name)}.</p>` });
 	const url = new URL(req.url);
 	const p = url.pathname;
 	const remoteBadge = /^\/account\/money\/shop\/badge\/([^/]{1,300})\/(\d{1,19})$/.exec(p);
@@ -562,7 +562,7 @@ export async function moneyRoute(req: Request, viewer: Viewer): Promise<Response
 		if (!image?.badge_image || !BADGE_TYPES.includes(image.badge_mime)) return new Response("Not found", { status: 404 });
 		return new Response(image.badge_image, { headers: { "content-type": image.badge_mime, "cache-control": "private, max-age=300", "x-content-type-options": "nosniff" } });
 	}
-	// a picture sent with a shop request, for the staff who review it (Admin > Equicoins)
+	// a picture sent with a shop request, for the staff who review it (Admin > Money)
 	const orderFile = /^\/account\/money\/shop\/file\/(\d{1,19})\/(\d{1,2})$/.exec(p);
 	if (req.method === "GET" && orderFile) {
 		if (viewer.role !== "admin" && viewer.role !== "moderator") return new Response("Not found", { status: 404 });
@@ -607,7 +607,7 @@ export async function moneyRoute(req: Request, viewer: Viewer): Promise<Response
 		}
 	}
 	if (p === "/account/money/shop") {
-		if (!settings().money_shop.enabled) return page(req, viewer, "Equicoins shop", `<p class="empty">The shop is closed.</p>`, 404);
+		if (!settings().money_shop.enabled) return page(req, viewer, "Money shop", `<p class="empty">The shop is closed.</p>`, 404);
 		let error = "";
 		if (req.method === "POST") {
 			if (viewer.actor) error = `Only @${esc(viewer.screen_name)} can buy from this account.`;
@@ -647,7 +647,7 @@ export async function moneyRoute(req: Request, viewer: Viewer): Promise<Response
 		}
 		const [items, orders, balance] = await Promise.all([shopItems(true), myShopOrders(viewer.id), balanceOf(viewer.id)]);
 		const notice = url.searchParams.has("ready") ? "It's ready: find it under Your requests." : url.searchParams.has("requested") ? "Your request is waiting for staff approval." : "";
-		return page(req, viewer, "Equicoins shop", await shopView(items, orders, balance, error, notice));
+		return page(req, viewer, "Money shop", await shopView(items, orders, balance, error, notice));
 	}
 	if (p === "/account/money/people") return peopleApi(viewer, url.searchParams.get("q") ?? "", url.searchParams.has("local"));
 	const sending = p === "/account/money/send";

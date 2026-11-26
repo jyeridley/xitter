@@ -1602,7 +1602,7 @@ alter table migration_objects add column if not exists created_at timestamptz no
 -- where an account went, as handle@instance; set by the new instance when the import finished
 alter table users add column if not exists moved_to text;
 alter table users add column if not exists moved_at timestamptz;
--- Equicoins (money.ts): each account's balance in cents, made on first use with
+-- Money (money.ts): each account's balance in cents, made on first use with
 -- the instance's starting balance, and every transfer between accounts
 create table if not exists money_wallets (
 	user_id bigint primary key references users (id) on delete cascade,
@@ -1667,7 +1667,7 @@ create table if not exists money_requests (
 create index if not exists money_requests_requester_idx on money_requests (requester_id, id desc);
 create index if not exists money_requests_payer_idx on money_requests (payer_id, id desc) where payer_id is not null;
 alter table money_transfers add column if not exists request_id bigint references money_requests (id) on delete set null;
--- merchant mode (Settings > Equicoins), for gold organisations: payments to
+-- merchant mode (Settings > Money), for gold organisations: payments to
 -- them read as purchases ("$3.52 at Taco Bell")
 create table if not exists money_merchants (
 	user_id bigint primary key references users (id) on delete cascade,
@@ -1685,7 +1685,7 @@ create table if not exists money_like_rewards (
 	primary key (post_id, liker_id)
 );
 create index if not exists money_like_rewards_author_idx on money_like_rewards (author_id, created_at desc);
--- Equicoins shop: listings can award an existing custom badge or submit an
+-- Money shop: listings can award an existing custom badge or submit an
 -- instance announcement for staff approval. Orders hold the price until reviewed.
 create table if not exists money_shop_items (
 	id bigint primary key,
@@ -1786,7 +1786,7 @@ create table if not exists post_boosts (
 	ends_at timestamptz not null
 );
 create index if not exists post_boosts_ends_idx on post_boosts (ends_at);
--- when the account accepted Equicoins' disclaimer (money-page.ts), shown the first time Equicoins opens
+-- when the account accepted Money's disclaimer (money-page.ts), shown the first time Money opens
 alter table money_wallets add column if not exists disclaimer_at timestamptz;
 -- a payment staff reversed (Admin > Money): the money went back to its sender
 alter table money_transfers add column if not exists reversed_at timestamptz;
@@ -2034,7 +2034,7 @@ create table if not exists market_state (
 	key text primary key,
 	value double precision not null
 );
--- TradeX on Equicoins: companies listed by accounts with a blue or gold
+-- TradeX on Money: companies listed by accounts with a blue or gold
 -- checkmark carry their founder, a sector and a line about them
 alter table market_companies add column if not exists owner_id bigint references users(id) on delete set null;
 alter table market_companies add column if not exists sector text;

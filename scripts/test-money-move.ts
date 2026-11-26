@@ -1,4 +1,4 @@
-// A moved account's Equicoins balance arriving from its old instance
+// A moved account's Money balance arriving from its old instance
 // (money-federation.ts), against a migrated, disposable local database: taken
 // once per old account however many imports it was the source of, never for a
 // failed import, and at most MOVES_A_DAY moves' worth from a peer a day.

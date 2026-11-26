@@ -55,8 +55,8 @@ export async function moneyFederationApi(incoming: Incoming, method: string, pat
 		return signedAnswer(incoming, 200, await localTotals());
 	}
 	if (method !== "POST" || route !== "/federation/v1/money/transfer") return undefined;
-	if (!feature("money")) return signedAnswer(incoming, 404, { error: "Equicoins is not enabled here." });
-	if (!isPeer(incoming.from)) return signedAnswer(incoming, 403, { error: "This instance does not accept Equicoins transfers from that peer." });
+	if (!feature("money")) return signedAnswer(incoming, 404, { error: "Money is not enabled here." });
+	if (!isPeer(incoming.from)) return signedAnswer(incoming, 403, { error: "This instance does not accept Money transfers from that peer." });
 	let body: any;
 	try { body = incoming.json(); } catch { return signedAnswer(incoming, 400, { error: "Invalid transfer." }); }
 	const { economy, lockPeer, peerHasRoom } = await import("./money");
@@ -131,7 +131,7 @@ export async function moneyFederationApi(incoming: Incoming, method: string, pat
 		if (result === "moved") return signedAnswer(incoming, 403, { error: "That account's balance already moved here." });
 		return signedAnswer(incoming, 200, { accepted: true, duplicate: result === "duplicate" });
 	} catch (e) {
-		console.error("Equicoins federation transfer failed:", e instanceof Error ? e.message : e);
+		console.error("Money federation transfer failed:", e instanceof Error ? e.message : e);
 		return signedAnswer(incoming, 500, { error: "The transfer could not be recorded." });
 	}
 }
@@ -158,7 +158,7 @@ async function syncEconomy() {
 	(await import("./money")).setNetworkEconomy({ starting_cents: e.starting_cents, max_transfer_cents: e.max_transfer_cents, like_cents: e.like_cents });
 }
 
-// every peer that shares its totals, as last heard, for Admin > Equicoins
+// every peer that shares its totals, as last heard, for Admin > Money
 const peerTotals = new Map<string, { circulation: number; wallets: number; payments: number }>();
 export async function networkTotals() {
 	if (!settings().money.network_totals) return null;
@@ -190,7 +190,7 @@ async function syncRemoteShop(instance: string) {
 	let after = "";
 	for (let page = 0; page < 100; page++) {
 		const response = await signedFetch(instance, "GET", `/federation/v1/money/shop${after ? `?after=${after}` : ""}`, undefined, 4 * 1024 * 1024);
-		// a peer on a version without Equicoins has no shop to share
+		// a peer on a version without Money has no shop to share
 		if (response.status === 404 && !after) break;
 		if (response.status !== 200) throw new Error(`shop catalog answered ${response.status}`);
 		const catalog = response.json();
@@ -255,7 +255,7 @@ async function syncShops() {
 	if (syncingShop || !feature("money") || !settings().money_shop.enabled) return;
 	syncingShop = true;
 	try {
-		await Promise.all(peers().map((peer) => syncRemoteShop(peer.id).catch((e) => console.error(`Equicoins shop sync ${peer.id}:`, e instanceof Error ? e.message : e))));
+		await Promise.all(peers().map((peer) => syncRemoteShop(peer.id).catch((e) => console.error(`Money shop sync ${peer.id}:`, e instanceof Error ? e.message : e))));
 		const active = peers().map((p) => p.id);
 		await sql`update money_remote_shop_items set source_active = false where not (origin = any(${sql.array(active, "TEXT")}))`;
 	} finally { syncingShop = false; }
@@ -314,12 +314,12 @@ export async function pumpOnce() {
 
 export function startMoneyFederation() {
 	void pumpOnce();
-	setInterval(() => void pumpOnce().catch((e) => console.error("Equicoins federation queue:", e)), 15_000).unref();
+	setInterval(() => void pumpOnce().catch((e) => console.error("Money federation queue:", e)), 15_000).unref();
 	void syncShops();
-	setInterval(() => void syncShops().catch((e) => console.error("Equicoins shop sync:", e)), 5 * 60_000).unref();
+	setInterval(() => void syncShops().catch((e) => console.error("Money shop sync:", e)), 5 * 60_000).unref();
 	const economyAndTotals = () => {
-		void syncEconomy().catch((e) => console.error("Equicoins economy:", e instanceof Error ? e.message : e));
-		void syncTotals().catch((e) => console.error("Equicoins totals:", e instanceof Error ? e.message : e));
+		void syncEconomy().catch((e) => console.error("Money economy:", e instanceof Error ? e.message : e));
+		void syncTotals().catch((e) => console.error("Money totals:", e instanceof Error ? e.message : e));
 	};
 	economyAndTotals();
 	setInterval(economyAndTotals, 10 * 60_000).unref();

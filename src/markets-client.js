@@ -175,7 +175,7 @@ var pct=function(a,b){return b?(a-b)/b*100:0};
 var sg=function(x){return (x>=0?'+':'')+x.toFixed(2)+'%'};
 var chg=function(c){return pct(c.price,c.prevClose)};
 var qn=function(q){return Number(q).toLocaleString('en-US',{maximumFractionDigits:4})};
-var coin='<span class=coin title="Equicoins"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="'+COIN+'"/></svg></span>';
+var coin='<span class=coin title="Money"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="'+COIN+'"/></svg></span>';
 var eq=function(n){return coin+fmt(n)};
 var C=function(id){return db.companies.find(function(x){return x.id===id})};
 var CT=function(t){return db.companies.find(function(x){return x.ticker===String(t||'').toUpperCase()})};
@@ -257,7 +257,7 @@ function listCta(){
 }
 function emptyMarket(){return '<div class="card empty"><h2>No companies yet</h2><p>Nothing is listed on the market yet. Staff, and accounts with a blue or gold checkmark, can list a company'+(db.me&&db.me.canList?' right now.':'.')+'</p>'+(db.me&&db.me.canList?'<button class=primary data-go="new">List a company</button>':'')+'</div>'}
 function moneyBanner(){
- if(!db.money.on)return '<div class=banner><span class=coin style="font-size:20px;flex:0 0 auto">'+coin+'</span><div><b>Trading opens when Equicoins is turned on.</b> '+(db.admin?'Turn on Equicoins under Admin › Features, and every account trades with its own balance.':'Prices are live, but buying and selling waits for '+esc(db.money.name)+'.')+'</div></div>';
+ if(!db.money.on)return '<div class=banner><span class=coin style="font-size:20px;flex:0 0 auto">'+coin+'</span><div><b>Trading opens when Money is turned on.</b> '+(db.admin?'Turn on Money under Admin › Features, and every account trades with its own balance.':'Prices are live, but buying and selling waits for '+esc(db.money.name)+'.')+'</div></div>';
  return '';
 }
 
@@ -270,7 +270,7 @@ function dash(){
  var ix=db.index.slice(-S.ir),first=ix.length?ix[0][1]:mc,last=ix.length?ix[ix.length-1][1]:mc,d=last-first;
  var hero='<div class=tile style="padding:16px 0 0"><div class=between style="padding:0 16px;align-items:flex-start"><div><div class=lbl>Total market cap</div><div class="big xl">'+big(mc)+'</div><div class=row style="gap:8px;margin-top:6px"><span class="num '+(d>=0?'up':'dn')+'" style="flex:0 0 auto;font-weight:700">'+(d>=0?'+':'−')+fmt(Math.abs(d))+'</span><span style="flex:0 0 auto">'+pill(pct(last,first))+'</span></div></div><div class=seg>'+[[30,'1M'],[150,'5M'],[300,'All']].map(function(a){return '<button class="'+(S.ir===a[0]?'on':'')+'" data-ir="'+a[0]+'">'+a[1]+'</button>'}).join('')+'</div></div><div style="margin-top:8px">'+chart(ix,'ix',230)+'</div></div>';
  var vol=all.reduce(function(s,c){return s+c.volume},0);
- var mine=db.me&&db.me.cash!=null?(function(){var hv=holdingsValue();return '<div class=tile data-go="acct" style="cursor:pointer"><div class=lbl>Your portfolio</div><div class=mid style="margin-top:4px">'+eq(db.me.cash+hv)+'</div><div class=lbl style="margin-top:4px">'+fmt(db.me.cash)+' Equicoins · '+fmt(hv)+' in shares</div></div>'})():'<div class=tile><div class=lbl>Shares traded</div><div class=mid style="margin-top:4px">'+vol.toLocaleString()+'</div><div class=lbl style="margin-top:4px">across '+all.length+' compan'+(all.length===1?'y':'ies')+'</div></div>';
+ var mine=db.me&&db.me.cash!=null?(function(){var hv=holdingsValue();return '<div class=tile data-go="acct" style="cursor:pointer"><div class=lbl>Your portfolio</div><div class=mid style="margin-top:4px">'+eq(db.me.cash+hv)+'</div><div class=lbl style="margin-top:4px">'+fmt(db.me.cash)+' in Money · '+fmt(hv)+' in shares</div></div>'})():'<div class=tile><div class=lbl>Shares traded</div><div class=mid style="margin-top:4px">'+vol.toLocaleString()+'</div><div class=lbl style="margin-top:4px">across '+all.length+' compan'+(all.length===1?'y':'ies')+'</div></div>';
  var panel=function(t,arr){return '<div class=panel><div class=hd><h3>'+t+'</h3></div><div class=list>'+(arr.slice(0,5).map(function(c){return item(c)}).join('')||'<div class=lbl style="padding:0 16px 16px">None right now</div>')+'</div></div>'};
  return headlines()+'<main>'+moneyBanner()
  +'<div class=hero>'+hero+'<div class=stack>'
@@ -292,21 +292,21 @@ function holdingsValue(){if(!db.me)return 0;return Object.keys(db.me.holdings).r
 function owned(c){var h=db.me&&db.me.holdings[c.id];return h?h.qty:0}
 function coChart(c){return chart(c.hist.slice(-S.range),'co'+c.id,innerWidth<700?220:320)}
 function ticket(c){
- if(!db.me)return '<div class=tile><div style="font-weight:800;margin-bottom:4px">Trade '+esc(c.ticker)+'</div><div class=note style="margin-bottom:12px">Sign in to buy and sell with your Equicoins.</div><button class="primary big" data-client="/i/flow/login">Sign in</button></div>';
- if(!db.money.on)return '<div class=tile><div style="font-weight:800;margin-bottom:4px">Trade '+esc(c.ticker)+'</div><div class=note>Trading opens when Equicoins is turned on.</div></div>';
+ if(!db.me)return '<div class=tile><div style="font-weight:800;margin-bottom:4px">Trade '+esc(c.ticker)+'</div><div class=note style="margin-bottom:12px">Sign in to buy and sell with your money.</div><button class="primary big" data-client="/i/flow/login">Sign in</button></div>';
+ if(!db.money.on)return '<div class=tile><div style="font-weight:800;margin-bottom:4px">Trade '+esc(c.ticker)+'</div><div class=note>Trading opens when Money is turned on.</div></div>';
  if(!db.me.accepted)return '<div class=tile><div style="font-weight:800;margin-bottom:6px">Before you trade</div><div class=note style="margin-bottom:12px">'+esc(db.money.disclaimer||'')+'</div><button class="primary big" data-accept>Accept and continue</button></div>';
  if(c.suspended)return '<div class=tile><div style="font-weight:800;margin-bottom:4px">Trading paused</div><div class=note>This listing is suspended.</div></div>';
  var buy=S.side==='buy';
  return '<div class="tile ticket"><div class=side><button class="'+(buy?'on b':'')+'" data-side=buy>Buy</button><button class="'+(!buy?'on s':'')+'" data-side=sell>Sell</button></div>'
  +'<div class=lbl style="margin-bottom:6px">Shares</div><div class=qty><button data-step=-1 aria-label="Fewer">−</button><input id=qty type=number inputmode=numeric min=1 step=1 placeholder="0" value="'+esc(S.q)+'"><button data-step=1 aria-label="More">+</button></div>'
  +'<div class=presets>'+[25,50,75,100].map(function(p){return '<button data-preset="'+p+'">'+(p===100?'Max':p+'%')+'</button>'}).join('')+'</div>'
- +'<div class=sum><span>Price</span><b id=tk-px>'+fp(c.price)+'</b></div><div class=sum><span>Estimated '+(buy?'cost':'proceeds')+'</span><b id=tk-tot>'+fmt(0)+'</b></div><div class=sum><span>Equicoins after</span><b id=tk-after>'+fmt(db.me.cash)+'</b></div>'
+ +'<div class=sum><span>Price</span><b id=tk-px>'+fp(c.price)+'</b></div><div class=sum><span>Estimated '+(buy?'cost':'proceeds')+'</span><b id=tk-tot>'+fmt(0)+'</b></div><div class=sum><span>Money after</span><b id=tk-after>'+fmt(db.me.cash)+'</b></div>'
  +'<div class=err id=tk-err></div><button class="big '+(buy?'buy':'sell')+'" id=tk-go>'+(buy?'Buy ':'Sell ')+esc(c.ticker)+'</button>'
- +'<div class=lbl style="margin-top:10px;text-align:center">'+coin+fmt(db.me.cash)+' Equicoins available · you own '+qn(owned(c))+'</div></div>'}
+ +'<div class=lbl style="margin-top:10px;text-align:center">'+coin+fmt(db.me.cash)+' Money available · you own '+qn(owned(c))+'</div></div>'}
 function maxQty(c){return S.side==='buy'?Math.floor(db.me.cash/c.price):Math.floor(owned(c))}
 function updTicket(){var c=C(S.cid);if(!c||!$('#tk-go'))return;var q=Math.floor(+($('#qty').value||0));S.q=$('#qty').value;var tot=q>0?q*c.price:0,buy=S.side==='buy',after=buy?db.me.cash-tot:db.me.cash+tot;
  $('#tk-px').textContent=fp(c.price);$('#tk-tot').textContent=fmt(tot);var a=$('#tk-after');a.textContent=(after<0?'−':'')+fmt(Math.abs(after));a.className=after<0?'dn':'';
- var err=buy&&after<0?'Not enough Equicoins':!buy&&q>owned(c)?'You own '+qn(owned(c))+' shares':'';$('#tk-err').textContent=err;$('#tk-go').disabled=!!err||!(q>0)||BUSY}
+ var err=buy&&after<0?'Not enough money':!buy&&q>owned(c)?'You own '+qn(owned(c))+' shares':'';$('#tk-err').textContent=err;$('#tk-go').disabled=!!err||!(q>0)||BUSY}
 function coPage(){var c=C(S.cid);if(!c)return '<main><div class="card empty"><h2>Company not found</h2><p>It may have been delisted.</p><button data-go="list">Browse the market</button></div></main>';
  var news=db.headlines.filter(function(h){return h.ticker===c.ticker});
  var canEdit=db.me&&(db.admin||(c.owner&&c.owner.handle===db.me.handle));
@@ -316,7 +316,7 @@ function coPage(){var c=C(S.cid);if(!c)return '<main><div class="card empty"><h2
  var newsP=news.length?'<div class=panel style="margin:0"><div class=hd><h3>News</h3></div><div class=list>'+news.slice(0,6).map(function(h){return '<div class=item style="cursor:default;display:block">'+(h.brk?'<span class="tag brk">BREAKING</span> ':'')+'<span class=lbl>'+esc(h.cat)+' · '+new Date(h.t).toLocaleDateString()+'</span><div style="margin-top:4px">'+esc(h.text)+'</div></div>'}).join('')+'</div></div>':'';
  return '<main>'+moneyBanner()+'<div class=wide2><div class=lcol style="display:flex;flex-direction:column;gap:12px;min-width:0"><div class=card style="padding:0;margin:0">'
  +'<div class=between style="padding:18px 18px 0;align-items:flex-start"><div style="display:flex;gap:14px;align-items:center;min-width:0">'+logo(c,'lg')+'<div style="min-width:0">'+nm(c,'coname')+'<div class=lbl>'+esc(c.ticker)+(c.sector?' · '+esc(c.sector):'')+(c.suspended?' · <span class="tag brk">SUSPENDED</span>':'')+'</div></div></div>'+(canEdit?'<button class=small data-go="edit" data-id="'+c.id+'" style="flex:0 0 auto">Edit</button>':'')+'</div>'
- +'<div class=between style="padding:14px 18px 0;align-items:flex-end"><div><div class="big xl" id=px>'+fp(c.price)+'</div><div class=row style="gap:8px;margin-top:4px"><span id=chg style="flex:0 0 auto">'+pill(chg(c))+'</span><span class=lbl style="flex:0 0 auto">Equicoins · since listing</span></div></div>'
+ +'<div class=between style="padding:14px 18px 0;align-items:flex-end"><div><div class="big xl" id=px>'+fp(c.price)+'</div><div class=row style="gap:8px;margin-top:4px"><span id=chg style="flex:0 0 auto">'+pill(chg(c))+'</span><span class=lbl style="flex:0 0 auto">since listing</span></div></div>'
  +'<div style="display:flex;align-items:center;gap:12px"><span class=lbl><span class=pulse></span>Live</span><div class=seg>'+[[30,'1M'],[90,'3M'],[200,'All']].map(function(a){return '<button class="'+(S.range===a[0]?'on':'')+'" data-range="'+a[0]+'">'+a[1]+'</button>'}).join('')+'</div></div></div>'
  +'<div id=live style="margin-top:10px">'+coChart(c)+'</div>'
  +'<div class=stats id=stats>'+stats(c)+'</div></div>'+about+newsP+'</div>'
@@ -326,12 +326,12 @@ function updateLive(){var c=C(S.cid);if(!c)return;var l=$('#live');if(l&&!l.quer
 function trade(){var c=C(S.cid),q=Math.floor(+$('#qty').value);
  if(!c||!(q>0)||BUSY)return;BUSY=true;$('#tk-go').disabled=true;
  api('trade',{id:c.id,side:S.side,qty:q}).then(function(st){BUSY=false;db=st;S.q='';render();toast((S.side==='buy'?'Bought ':'Sold ')+qn(q)+' '+c.ticker+' for '+fmt(q*c.price))},function(e){BUSY=false;toast(e.message,true);updTicket()})}
-function acct(){if(!db.me)return '<main><div class="card empty"><h2>Your portfolio</h2><p>Sign in to trade with your Equicoins.</p><button class=primary data-client="/i/flow/login">Sign in</button></div></main>';
+function acct(){if(!db.me)return '<main><div class="card empty"><h2>Your portfolio</h2><p>Sign in to trade with your money.</p><button class=primary data-client="/i/flow/login">Sign in</button></div></main>';
  var a=db.me;
  var rows=Object.keys(a.holdings).map(function(id){var c=C(id),p=a.holdings[id];return c?{c:c,qty:p.qty,cost:p.cost,v:c.price*p.qty}:null}).filter(Boolean).sort(function(x,y){return y.v-x.v});
  var val=rows.reduce(function(s,e){return s+e.v},0),cost=rows.reduce(function(s,e){return s+e.cost},0),ret=val-cost;
  return '<main>'+moneyBanner()+'<div class=tile style="margin-bottom:12px"><div class=lbl>Total value</div><div class=big>'+(a.cash==null?fmt(val):eq(a.cash+val))+'</div>'
- +'<div class=row style="gap:20px;margin-top:10px">'+(a.cash==null?'':'<div style="flex:0 0 auto"><div class=lbl>Equicoins</div><div style="font-weight:700" class=num>'+fmt(a.cash)+'</div></div>')+'<div style="flex:0 0 auto"><div class=lbl>In shares</div><div style="font-weight:700" class=num>'+fmt(val)+'</div></div><div style="flex:0 0 auto"><div class=lbl>Return</div><div style="font-weight:700" class="num '+(ret>=0?'up':'dn')+'">'+(ret>=0?'+':'−')+fmt(Math.abs(ret))+'</div></div></div></div>'
+ +'<div class=row style="gap:20px;margin-top:10px">'+(a.cash==null?'':'<div style="flex:0 0 auto"><div class=lbl>Money</div><div style="font-weight:700" class=num>'+fmt(a.cash)+'</div></div>')+'<div style="flex:0 0 auto"><div class=lbl>In shares</div><div style="font-weight:700" class=num>'+fmt(val)+'</div></div><div style="flex:0 0 auto"><div class=lbl>Return</div><div style="font-weight:700" class="num '+(ret>=0?'up':'dn')+'">'+(ret>=0?'+':'−')+fmt(Math.abs(ret))+'</div></div></div></div>'
  +'<div class=panel style="padding:0"><div class=hd><h3>Holdings</h3><span class=lbl>@'+esc(a.handle)+'</span></div>'+(rows.length?'<div class="tr th hold"><div>Company</div><div>Shares</div><div>Price</div><div>Value</div><div>Return</div><div>Chart</div></div>'+rows.map(function(e){var r=e.v-e.cost,c=e.c;return '<div class="tr go hold" data-go="co" data-id="'+c.id+'"><div class=co>'+logo(c)+'<div class=who>'+nm(c,'t1')+'<div class=t2>'+qn(e.qty)+' shares · '+esc(c.ticker)+'</div></div></div><div class=pxc><div class=dsk>'+qn(e.qty)+'</div><div class=capm style="font-weight:700">'+fmt(e.v)+'</div><div class="capm '+(r>=0?'up':'dn')+'" style="font-size:13px">'+(r>=0?'+':'−')+fmt(Math.abs(r))+'</div></div><div>'+fp(c.price)+'</div><div>'+fmt(e.v)+'</div><div class="'+(r>=0?'up':'dn')+'">'+(r>=0?'+':'−')+fmt(Math.abs(r))+'</div><div style="display:flex;justify-content:flex-end">'+spark(c)+'</div></div>'}).join(''):'<div class=lbl style="padding:0 16px 16px">No holdings yet. Pick a company on the Markets tab to buy your first shares.</div>')+'</div>'
  +'<div class=panel><div class=hd><h3>Activity</h3></div>'+(a.txns.length?'<div style="overflow-x:auto"><table><tr><th>Order</th><th>Shares</th><th class=m>Price</th><th>Total</th><th class=m>When</th></tr>'
  +a.txns.map(function(t){return '<tr><td><span class="'+(t.side==='buy'?'up':'dn')+'" style="font-weight:700">'+(t.side==='buy'?'Buy':'Sell')+'</span> '+esc(t.ticker)+'</td><td>'+qn(t.qty)+'</td><td class=m>'+fp(t.price)+'</td><td>'+(t.side==='buy'?'−':'+')+fmt(t.total)+'</td><td class=m>'+new Date(t.t).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+'</td></tr>'}).join('')+'</table></div>':'<div class=lbl style="padding:0 16px 16px">No orders yet.</div>')+'</div></main>'}
@@ -344,12 +344,12 @@ function companyForm(c){
  if(isNew&&db.me.ownMax!=null&&db.me.owned>=db.me.ownMax)return '<main><div class="card empty"><h2>You\'ve listed '+db.me.owned+' companies</h2><p>Each account can list up to '+db.me.ownMax+'.</p><button data-go="dash">Back to Markets</button></div></main>';
  var sec=(db.sectors||[]).map(function(s){return '<option'+(c&&c.sector===s?' selected':'')+'>'+esc(s)+'</option>'}).join('');
  return '<main><div class="dlg wide"><div class=card style="padding:24px">'
- +'<div class=h2>'+(isNew?'List a company':'Edit '+esc(c.ticker))+'</div><div class=note style="margin-bottom:18px">'+(isNew?'It trades in Equicoins from the moment it\'s listed. '+(db.admin?'':'You\'re shown as its founder.'):'The ticker, share count and price are set by staff.')+'</div>'
+ +'<div class=h2>'+(isNew?'List a company':'Edit '+esc(c.ticker))+'</div><div class=note style="margin-bottom:18px">'+(isNew?'It trades in Money from the moment it\'s listed. '+(db.admin?'':'You\'re shown as its founder.'):'The ticker, share count and price are set by staff.')+'</div>'
  +'<div class=preview>'+'<span id=pv-logo>'+(c?logo(c,'lg'):'<img class="logo-img lg'+(db.me.sq?'':' round')+'" src="'+esc(db.me.avatar)+'" alt="">')+'</span><div style="min-width:0"><div class=nm style="font-weight:800"><span id=pv-name>'+(c?esc(c.name):'Company name')+'</span>'+badge(c?(c.owner&&c.owner.badge):db.me.badge)+'</div><div class=lbl id=pv-sub>'+(c?esc(c.ticker)+' · '+esc(c.sector||''):'TICKER · Sector')+'</div></div><div style="margin-left:auto;text-align:right" id=pv-cap>'+(c?'<div class=num style="font-weight:700">'+fp(c.price)+'</div><div class=lbl>'+big(c.price*c.shares)+' cap</div>':'')+'</div></div>'
  +'<label class=f><span>Company name<i id=n-name>0/50</i></span><input id=f-name maxlength=50 value="'+(c?esc(c.name):'')+'" placeholder="Bloxburg Burgers"></label>'
  +(isNew?'<div class=row style="gap:12px"><label class=f><span>Ticker</span><input id=f-ticker maxlength=5 placeholder="BURG" style="text-transform:uppercase;font-weight:700;letter-spacing:.05em"></label><label class=f><span>Sector</span><select id=f-sector>'+sec+'</select></label></div>':'<label class=f><span>Sector</span><select id=f-sector>'+sec+'</select></label>')
  +'<label class=f><span>What it does<i id=n-desc>0/200</i></span><textarea id=f-desc maxlength=200 placeholder="Burgers and fries, made fresh on Main Street.">'+(c?esc(c.description||''):'')+'</textarea></label>'
- +(isNew?'<div class=row style="gap:12px"><label class=f><span>Starting price (Equicoins)</span><input id=f-price type=number min=0.1 max=1000 step=0.01 placeholder="10.00"></label><label class=f><span>Shares outstanding</span><input id=f-shares type=number min=1000 max=10000000 step=1 placeholder="100000"></label></div><div class=note style="margin:-6px 0 14px">Price $0.10–$1,000 · 1,000–10,000,000 shares · tickers are 2–5 letters.</div>':'')
+ +(isNew?'<div class=row style="gap:12px"><label class=f><span>Starting price (Money)</span><input id=f-price type=number min=0.1 max=1000 step=0.01 placeholder="10.00"></label><label class=f><span>Shares outstanding</span><input id=f-shares type=number min=1000 max=10000000 step=1 placeholder="100000"></label></div><div class=note style="margin:-6px 0 14px">Price $0.10–$1,000 · 1,000–10,000,000 shares · tickers are 2–5 letters.</div>':'')
  +(isNew&&!db.admin||c&&c.owner?'<div class=note style="margin:-4px 0 14px">'+(isNew?'Your':'Its founder\'s')+' profile picture and checkmark are the company\'s picture and badge. Change '+(isNew?'your':'their')+' picture on '+(isNew?'your':'their')+' profile and the market follows.</div>':'')
  +'<div class=err id=f-err></div><div class=row style="gap:8px"><button data-back>Cancel</button><button class=primary id=f-go>'+(isNew?'List company':'Save')+'</button></div></div></div></main>'}
 function formPreview(){var n=$('#f-name');if(!n)return;var t=$('#f-ticker'),p=$('#f-price'),s=$('#f-shares');$('#n-name').textContent=n.value.length+'/50';$('#n-desc').textContent=$('#f-desc').value.length+'/200';$('#pv-name').textContent=n.value||'Company name';
@@ -401,7 +401,7 @@ function adEvents(){var ev=db.events||[];
  +'<div class=row><input id=em type=number min=0.1 max=99 step=0.1 placeholder="Market %"><button data-a=evMarket data-sign=-1>Market Crash</button><button class=primary data-a=evMarket data-sign=1>Market Boost</button></div>'
  +'<div class=row><input id=rc type=number min=1 step=1 placeholder="How many companies"><input id=er type=number min=0.1 max=99 step=0.1 placeholder="Drop %"><button data-a=evRandom>Random Drop</button></div>'
  +'<div class=row><input id=tr type=number min=0.1 max=99 step=0.1 placeholder="Tax %"><button class=primary data-a=runTax>Tax Season!</button></div>'
- +'<div class=row><button data-a=runScandal style="flex:0 0 auto">Political Scandal</button><span class=lbl style="flex:2 1 200px">Every investor pulls out half of their holdings into Equicoins.</span></div>'
+ +'<div class=row><button data-a=runScandal style="flex:0 0 auto">Political Scandal</button><span class=lbl style="flex:2 1 200px">Every investor pulls out half of their holdings into Money.</span></div>'
  +'<div class=lbl style="margin-top:12px">History</div>'+(ev.map(function(e){return '<div style="padding:8px 0;border-bottom:1px solid var(--line);font-size:14px"><span class=lbl>'+new Date(e.t).toLocaleString()+'</span> · '+esc(e.name)+' — '+esc(e.detail)+'</div>'}).join('')||'<div class=lbl style="padding:8px 0">No events yet</div>')+'</div>'}
 function adHl(){return '<div class=card><h3>Headlines</h3><input id=ht placeholder="Headline" maxlength=280 style="margin-bottom:8px"><div class=row>'
  +'<select id=hc><option>Markets</option><option>Corporate</option><option>Economy</option><option>Policy</option><option>Major event</option></select>'
@@ -409,7 +409,7 @@ function adHl(){return '<div class=card><h3>Headlines</h3><input id=ht placehold
  +'<label class=lbl style="flex:0 0 auto;display:flex;gap:6px;align-items:center"><input type=checkbox id=hb style="width:auto;min-height:0"> BREAKING</label>'
  +'<button class=primary data-a=pubHl>Publish</button></div>'
  +'<div style="overflow-x:auto;margin-top:8px"><table>'+(db.headlines.map(function(h){return '<tr><td style="white-space:normal">'+(h.brk?'<span class="tag brk">BREAKING</span> ':'')+esc(h.text)+'<div class=lbl>'+esc(h.cat)+(h.ticker?' · '+esc(h.ticker):'')+'</div></td><td><button class=small data-a=edHl data-id="'+h.id+'">Edit</button> <button class="small danger" data-a=delHl data-id="'+h.id+'">Delete</button></td></tr>'}).join('')||'<tr><td class=lbl>No headlines</td></tr>')+'</table></div></div>'}
-function adAcc(){var A=AD.accounts;return '<div class=lbl>Everyone who has traded, with their Equicoins balance</div><div style="overflow-x:auto"><table><tr><th>Account</th><th>Equicoins</th><th class=m>In shares</th><th class=m>Positions</th><th class=m>First trade</th></tr>'
+function adAcc(){var A=AD.accounts;return '<div class=lbl>Everyone who has traded, with their money balance</div><div style="overflow-x:auto"><table><tr><th>Account</th><th>Money</th><th class=m>In shares</th><th class=m>Positions</th><th class=m>First trade</th></tr>'
  +(A.map(function(a){return '<tr><td>@'+esc(a.screen_name)+' <span class=lbl>'+esc(a.name)+'</span></td><td>'+fmt(a.cash)+'</td><td class=m>'+fmt(a.equity)+'</td><td class=m>'+a.positions+'</td><td class=m>'+new Date(a.created).toLocaleDateString()+'</td></tr>'}).join('')||'<tr><td colspan=5 class=lbl>No investors yet</td></tr>')+'</table></div>'}
 function adLog(){return (AD.logs.map(function(e){return '<div style="padding:8px 0;border-bottom:1px solid var(--line);font-size:14px"><span class=lbl>'+new Date(e.t).toLocaleString()+'</span> · '+esc(e.a)+'</div>'}).join('')||'<p class=lbl>No activity yet.</p>')}
 var V=function(s){var e=$(s);return e?e.value:''};
@@ -434,7 +434,7 @@ var ADMIN={
  evMarket:function(_,el){var sign=+el.getAttribute('data-sign'),p=+V('#em');if(!(p>0))return toast('Enter a percentage',true);act('eventMarket',{pct:p,sign:sign},(sign<0?'Market crash':'Market boost')+' of '+p+'% on all listed companies?')},
  evRandom:function(){var p=+V('#er'),n=+V('#rc'),L=db.companies.filter(function(c){return !c.suspended});if(!(p>0))return toast('Enter a percentage',true);if(!(n>0)||!L.length)return toast('Enter how many companies, and make sure some are listed',true);var k=Math.min(n,L.length);act('randomDrop',{pct:p,count:n},'Drop '+k+' random compan'+(k>1?'ies':'y')+' by '+p+'%?')},
  runTax:function(){var r=+V('#tr');if(!(r>0&&r<100))return toast('Enter a tax rate between 0 and 100',true);act('tax',{rate:r},'Tax '+r+'% of every account\'s holdings and send it to the market gap?')},
- runScandal:function(){act('scandal',{},'Political Scandal: every investor pulls out half of their holdings into Equicoins?')},
+ runScandal:function(){act('scandal',{},'Political Scandal: every investor pulls out half of their holdings into Money?')},
  pubHl:function(){var text=V('#ht').trim();if(!text)return toast('Enter a headline',true);act('headline',{text:text,cat:V('#hc'),ticker:V('#hk'),breaking:$('#hb').checked})},
  edHl:function(id){var h=db.headlines.find(function(x){return x.id===id});var t=prompt('Edit headline',h.text);if(t===null)return;var b=confirm('Mark as BREAKING? OK = yes, Cancel = no');act('editHeadline',{id:id,text:t.trim()||h.text,breaking:b})},
  delHl:function(id){act('deleteHeadline',{id:id},'Delete this headline?')}
@@ -446,7 +446,7 @@ function tabs(){return [['dash','Overview'],['list','Markets']].concat(db.me?[['
 function render(){
  var co=(S.page==='co'||S.page==='edit')&&C(S.cid);
  var title=S.page==='co'&&co?co.ticker:S.page==='new'?'List a company':S.page==='edit'&&co?'Edit '+co.ticker:'Markets';
- var sub=S.page==='co'&&co?esc(co.name):db.me&&db.me.cash!=null?coin+fmt(db.me.cash)+' Equicoins':'TradeX · '+esc(db.money.name);
+ var sub=S.page==='co'&&co?esc(co.name):db.me&&db.me.cash!=null?coin+fmt(db.me.cash)+' in Money':'TradeX · '+esc(db.money.name);
  var back=S.page==='co'||S.page==='new'||S.page==='edit'||!framed;
  var bar='<div class=bar>'+(back?'<button class=iconbtn data-back aria-label="Back">'+BACK+'</button>':'')+'<div class=grow><h1>'+esc(title)+'</h1><div class=sub>'+sub+'</div></div>'+(db.me&&db.me.canList&&S.page!=='new'&&S.page!=='edit'?'<button class="small primary" data-go="new" style="flex:0 0 auto">List a company</button>':'')+'</div>';
  var nav=S.page==='new'||S.page==='edit'?'':'<nav class=tabs>'+tabs().map(function(t){return '<a href="#" data-go="'+t[0]+'" class="'+(S.page===t[0]||(t[0]==='list'&&S.page==='co')?'on':'')+'">'+t[1]+'</a>'}).join('')+'</nav>';

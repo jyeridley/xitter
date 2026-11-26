@@ -281,12 +281,12 @@ async function uploadMedia(req: Request, v: Viewer) {
 	return { media_id: id, processing: done.processing_info?.state ?? "succeeded" };
 }
 
-// ---- Equicoins (money.ts): the instance's own play money, with no cash value
+// ---- Money (money.ts): the instance's own play money, with no cash value
 
 // on for this instance and, before any money moves, the disclaimer accepted
 async function moneyOn(v: Viewer, { accepted = true } = {}) {
-	if (!feature("money")) throw new ApiError(404, `Equicoins isn't on for ${settings().instance_name}.`);
-	if (accepted && !(await disclaimerAccepted(v.id))) throw new ApiError(403, "Accept Equicoins' disclaimer first: POST /money/disclaimer.");
+	if (!feature("money")) throw new ApiError(404, `Money isn't on for ${settings().instance_name}.`);
+	if (accepted && !(await disclaimerAccepted(v.id))) throw new ApiError(403, "Accept Money's disclaimer first: POST /money/disclaimer.");
 }
 async function moneyCall<T>(f: () => Promise<T>): Promise<T> {
 	try {
@@ -369,7 +369,7 @@ const MONEY_ROUTES: Route[] = [
 		run: async (v) => {
 			await moneyOn(v, { accepted: false });
 			const m = economy();
-			return { data: { name: `${settings().instance_name} Equicoins`, balance_cents: await balanceOf(v.id), disclaimer_accepted: await disclaimerAccepted(v.id), disclaimer: disclaimerText(), max_transfer_cents: m.max_transfer_cents, like_cents: m.like_cents, note_max: NOTE_MAX } };
+			return { data: { name: `${settings().instance_name} Money`, balance_cents: await balanceOf(v.id), disclaimer_accepted: await disclaimerAccepted(v.id), disclaimer: disclaimerText(), max_transfer_cents: m.max_transfer_cents, like_cents: m.like_cents, note_max: NOTE_MAX } };
 		},
 	},
 	{

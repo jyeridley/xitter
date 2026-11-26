@@ -1,4 +1,4 @@
-// Equicoins through the public API (/api/v1/money), against a migrated,
+// Money through the public API (/api/v1/money), against a migrated,
 // disposable local database: the switch and the disclaimer, paying (once per
 // idempotency key, never past the balance), requests of one account and
 // "Pay @you" cards, who sees which payment, blocks, and earnings from likes.
@@ -34,7 +34,7 @@ try {
 	const start = settings().money.starting_cents;
 
 	// a connected app's token reaches the money as far as its scope goes (the
-	// consent page lists Equicoins): a read-only one sees it but can't send
+	// consent page lists Money): a read-only one sees it but can't send
 	const app = newId();
 	await sql`insert into oauth_clients (id, owner_id, name, redirect_uri) values (${app}::bigint, ${people.c}::bigint, 'Some app', 'https://app.example/cb')`;
 	const appToken = `xit_${Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString("hex")}`;
@@ -125,7 +125,7 @@ try {
 	const earned = (await call(tok.a, "GET", "/money/activity")).earnings;
 	assert.deepEqual([earned[0].likes, earned[0].cents], [1, settings().money.like_cents]);
 
-	console.log("Equicoins API checks passed");
+	console.log("Money API checks passed");
 } finally {
 	await setSetting("features", features);
 	await sql`delete from users where id = any(${sql.array(Object.values(people), "INT8")})`;

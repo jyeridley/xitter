@@ -99,7 +99,7 @@ export async function createAd(
 		if (url && (url.length > AD_URL_MAX || !/^https?:\/\/[^\s/]+\.[^\s]+$/i.test(url))) throw new AdError("The link must be an http or https address.");
 	}
 	const budget = Number(input.budgetCents);
-	if (!Number.isSafeInteger(budget) || budget < rules.min_spend_cents) throw new AdError(`The budget is at least ${formatCents(rules.min_spend_cents)} Equicoins.`);
+	if (!Number.isSafeInteger(budget) || budget < rules.min_spend_cents) throw new AdError(`The budget is at least ${formatCents(rules.min_spend_cents)}.`);
 	const days = Number(input.days);
 	if (!Number.isInteger(days) || days < 1 || days > rules.max_days) throw new AdError(`An ad runs for 1 to ${rules.max_days} days.`);
 	const row = await sql.begin(async (tx) => {
@@ -118,7 +118,7 @@ export async function createAd(
 		const [pending] = await tx`select count(*)::int as n from ads where user_id = ${userId}::bigint and status = 'pending'`;
 		if (Number(pending.n) >= rules.max_pending) throw new AdError(`You have ${rules.max_pending} ads waiting for review. Wait for those first.`);
 		const [wallet] = await tx`select balance_cents::bigint as cents from money_wallets where user_id = ${userId}::bigint for update`;
-		if (!wallet || Number(wallet.cents) < budget) throw new AdError("You don't have enough Equicoins for that budget.");
+		if (!wallet || Number(wallet.cents) < budget) throw new AdError("You don't have enough money for that budget.");
 		await tx`update money_wallets set balance_cents = balance_cents - ${budget} where user_id = ${userId}::bigint`;
 		const [made] = await tx`insert into ads (id, user_id, text, url, budget_cents, days, status, ad_only, post_id, existing_post, name)
 			values (${newId()}::bigint, ${userId}::bigint, ${body}, ${url}, ${budget}, ${days}, 'pending', ${!postId && input.adOnly !== false},
@@ -187,8 +187,8 @@ export async function extendAd(userId: string, adId: string, input: { budgetCent
 	const rules = settings().ads;
 	const add = Number(input.budgetCents ?? 0);
 	const days = Number(input.days ?? 0);
-	if (!Number.isSafeInteger(add) || add < 0 || !Number.isInteger(days) || days < 0) throw new AdError("Add a whole number of days or an amount of Equicoins.");
-	if (!add && !days) throw new AdError("Add days or Equicoins to extend an ad.");
+	if (!Number.isSafeInteger(add) || add < 0 || !Number.isInteger(days) || days < 0) throw new AdError("Add a whole number of days or an amount of money.");
+	if (!add && !days) throw new AdError("Add days or money to extend an ad.");
 	const row = await sql.begin(async (tx) => {
 		const [ad] = await tx`select ${adCols}, extract(epoch from coalesce(paused_left, ends_at - now()))::float8 as left_s from ads where id = ${adId}::bigint and user_id = ${userId}::bigint for update`;
 		if (!ad) throw new AdError("No such ad.");
@@ -196,7 +196,7 @@ export async function extendAd(userId: string, adId: string, input: { budgetCent
 		if (Number(ad.left_s) + days * 86_400 > rules.max_days * 86_400) throw new AdError(`An ad can't run more than ${rules.max_days} days ahead.`);
 		if (add) {
 			const [wallet] = await tx`select balance_cents::bigint as cents from money_wallets where user_id = ${userId}::bigint for update`;
-			if (!wallet || Number(wallet.cents) < add) throw new AdError("You don't have enough Equicoins for that.");
+			if (!wallet || Number(wallet.cents) < add) throw new AdError("You don't have enough money for that.");
 			await tx`update money_wallets set balance_cents = balance_cents - ${add} where user_id = ${userId}::bigint`;
 		}
 		const [done] = await tx`update ads set budget_cents = budget_cents + ${add}, days = days + ${days},

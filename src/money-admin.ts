@@ -1,4 +1,4 @@
-// Admin > Equicoins (admin.html): settings, how much money there is and
+// Admin > Money (admin.html): settings, how much money there is and
 // where it went, and the tools to put it right: adjusting a balance and
 // reversing a payment. Every change is in the audit log.
 

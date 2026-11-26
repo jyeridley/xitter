@@ -1,4 +1,4 @@
-// Equicoins shop. Purchases are charged up front and stay pending
+// Money shop. Purchases are charged up front and stay pending
 // until a moderator or admin approves them; a rejection refunds the wallet.
 // An invite code is the exception: it is made at once (nothing to review).
 // What a request carries is checked here, before any money moves; approving

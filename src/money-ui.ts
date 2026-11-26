@@ -1,4 +1,4 @@
-// Equicoins in the client (money.ts): payment and "Pay @name" cards drawn over
+// Money in the client (money.ts): payment and "Pay @name" cards drawn over
 // the summary card of a post carrying a payment's or request's link, the
 // composer's $ button that puts a Pay button or one of your payments in the
 // post, and opening the composer with one in it from the Money pages
@@ -157,7 +157,7 @@ export const MONEY_UI_SCRIPT = `(function(){
 		close();
 		var box=el("div");box.id="xitter-pay";
 		box.style.background=bg();box.style.color=getComputedStyle(document.body).color;
-		box.appendChild(el("div","xp-head","Equicoins"));
+		box.appendChild(el("div","xp-head","Money"));
 		var list=el("div","xp-list");
 		function action(title,sub,run){
 			var b=el("button","xp-item");b.type="button";

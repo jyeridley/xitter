@@ -1,9 +1,9 @@
 // TradeX, Jye's play stock market, at /i/markets: staff (the admin role) and
 // accounts with a blue or gold checkmark list companies, prices drift a little
-// every two seconds, and every signed-in account trades with its Equicoins
+// every two seconds, and every signed-in account trades with its money
 // (money.ts: the wallet's balance is the cash; a buy takes from it and a sale
 // pays into it, in the same transaction as the shares). Everyone sees the same
-// market (Postgres); signed out, or with Equicoins off, it's read-only. A port
+// market (Postgres); signed out, or with Money off, it's read-only. A port
 // of Jye's one-file tradex.html, whose page script is markets-client.js.
 //
 // Like the election page (election.ts), a browser opening /i/markets gets it
@@ -54,7 +54,7 @@ const pct = (a: number, b: number) => (b ? ((a - b) / b) * 100 : 0);
 const sg = (x: number) => (x >= 0 ? "+" : "") + x.toFixed(2) + "%";
 const isAdmin = (v: Viewer | undefined) => v?.role === "admin";
 const moneyOn = () => feature("money");
-const coinName = () => `${settings().instance_name} Equicoins`;
+const coinName = () => `${settings().instance_name} Money`;
 
 // ---------- the market's clock ----------
 
@@ -91,7 +91,7 @@ async function tick() {
 // a market with history: the walk a price took to get where it is, run
 // backwards from it, two seconds a step, so a new listing (or one whose chart
 // is flat) looks like it has been trading for a while. Prices only; nobody's
-// shares or Equicoins are touched.
+// shares or Money are touched.
 const normal = () => Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(2 * Math.PI * Math.random());
 function pastWalk(price: number, n: number): number[] {
 	const out = [price];
@@ -227,7 +227,7 @@ function shared(): Promise<Shared> {
 	return cache.value;
 }
 
-// an account's side of the market: its Equicoins (money.ts) are its cash
+// an account's side of the market: its money (money.ts) are its cash
 async function account(viewer: Viewer) {
 	const on = moneyOn();
 	const [[u], holdings, txns, [owned]] = await Promise.all([
@@ -236,7 +236,7 @@ async function account(viewer: Viewer) {
 		sql`select side, ticker, qty, price::float8, coalesce(total_cents::float8 / 100, total::float8) as total, (extract(epoch from created_at) * 1000)::float8 as t from market_txns where user_id = ${viewer.id} order by id desc limit 100`,
 		sql`select count(*)::int as n from market_companies where owner_id = ${viewer.id}`,
 	]);
-	// the wallet is only made (with the instance's starting balance) once Equicoins is on
+	// the wallet is only made (with the instance's starting balance) once Money is on
 	const cents = on ? await balanceOf(viewer.id) : null;
 	const accepted = on ? await disclaimerAccepted(viewer.id) : false;
 	const canList = LISTERS.includes(u?.verified_type) && u?.status !== "restricted" && u?.status !== "suspended";
@@ -276,11 +276,11 @@ class Refusal extends Error {
 	}
 }
 
-// A buy takes its Equicoins from the wallet and a sale pays into it, in one
+// A buy takes its money from the wallet and a sale pays into it, in one
 // transaction with the shares: the company's row, then the wallet, then the
 // holding are locked, so two orders at once can't spend the same coins.
 async function trade(viewer: Viewer, body: any) {
-	if (!moneyOn()) throw new Refusal("Trading opens once Equicoins is turned on.");
+	if (!moneyOn()) throw new Refusal("Trading opens once Money is turned on.");
 	const side = body?.side === "sell" ? "sell" : body?.side === "buy" ? "buy" : null;
 	const q = Math.floor(Number(body?.qty));
 	if (!side) throw new Refusal("Choose buy or sell");
@@ -297,7 +297,7 @@ async function trade(viewer: Viewer, body: any) {
 		const cents = Math.round(q * c.price * 100);
 		if (!Number.isSafeInteger(cents)) throw new Refusal("That order is too big");
 		if (side === "buy") {
-			if (cents > Number(w.cents)) throw new Refusal("You don't have enough Equicoins for that.");
+			if (cents > Number(w.cents)) throw new Refusal("You don't have enough money for that.");
 			await tx`update money_wallets set balance_cents = balance_cents - ${cents} where user_id = ${viewer.id}::bigint`;
 			await tx`insert into market_holdings (user_id, company_id, qty, cost) values (${viewer.id}, ${c.id}, ${q}, ${cents / 100})
 				on conflict (user_id, company_id) do update set qty = market_holdings.qty + excluded.qty, cost = market_holdings.cost + excluded.cost`;
@@ -493,13 +493,13 @@ const ADMIN: Record<string, (b: any, v: Viewer) => Promise<unknown>> = {
 	},
 	async scandal(_b, v) {
 		await sql.begin(async (tx) => {
-			// the half each investor pulls out is paid into their Equicoins
+			// the half each investor pulls out is paid into their money
 			await tx`insert into money_wallets (user_id, balance_cents) select distinct user_id, 0 from market_holdings on conflict (user_id) do nothing`;
 			await tx`update money_wallets w set balance_cents = w.balance_cents + s.v from (select h.user_id, round(sum(c.price::float8 * h.qty * 0.5) * 100)::bigint v from market_holdings h join market_companies c on c.id = h.company_id group by h.user_id) s where s.user_id = w.user_id`;
 			await tx`update market_holdings set qty = qty * 0.5, cost = cost * 0.5`;
 			await tx`delete from market_holdings where qty < 0.0001`;
 		});
-		await event("Political Scandal", "Half of all holdings pulled out to Equicoins", v);
+		await event("Political Scandal", "Half of all holdings cashed out to Money", v);
 	},
 	// Headlines
 	async headline(b, v) {
@@ -524,7 +524,7 @@ const ADMIN: Record<string, (b: any, v: Viewer) => Promise<unknown>> = {
 
 async function adminData() {
 	const [accounts, logs] = await Promise.all([
-		// everyone who has traded, with their Equicoins balance
+		// everyone who has traded, with their money balance
 		sql`select u.screen_name, u.name, coalesce(w.balance_cents, 0)::float8 / 100 as cash, (extract(epoch from i.first) * 1000)::float8 as created,
 			(select count(*)::int from market_holdings h where h.user_id = i.user_id) as positions,
 			(select coalesce(sum(h.qty * c.price::float8), 0)::float8 from market_holdings h join market_companies c on c.id = h.company_id where h.user_id = i.user_id) as equity
@@ -553,10 +553,10 @@ function describeMarket(s: Shared) {
 	const all = s.companies, L = all.filter((c) => !c.suspended);
 	if (!all.length) return "No companies are listed yet.";
 	const mc = all.reduce((t, c) => t + c.price * c.shares, 0), base = all.reduce((t, c) => t + c.prevClose * c.shares, 0);
-	return `Total market cap ${big(mc)} Equicoins (${sg(pct(mc, base))}) · ${all.length} listed compan${all.length === 1 ? "y" : "ies"}, ${L.length} active.`;
+	return `Total market cap ${big(mc)} (${sg(pct(mc, base))}) · ${all.length} listed compan${all.length === 1 ? "y" : "ies"}, ${L.length} active.`;
 }
 function describeCompany(c: Company) {
-	return `${c.name} (${c.ticker}) ${fmtP(c.price)} Equicoins ${sg(pct(c.price, c.prevClose))} · market cap ${big(c.price * c.shares)} · volume ${c.volume.toLocaleString("en-US")}${c.sector ? ` · ${c.sector}` : ""}${c.owner ? ` · founded by @${c.owner.handle}` : ""}${c.suspended ? " · SUSPENDED" : ""}`;
+	return `${c.name} (${c.ticker}) ${fmtP(c.price)} ${sg(pct(c.price, c.prevClose))} · market cap ${big(c.price * c.shares)} · volume ${c.volume.toLocaleString("en-US")}${c.sector ? ` · ${c.sector}` : ""}${c.owner ? ` · founded by @${c.owner.handle}` : ""}${c.suspended ? " · SUSPENDED" : ""}`;
 }
 
 async function page(req: Request, viewer: Viewer | undefined): Promise<Response> {
@@ -678,10 +678,10 @@ function ogSvg(s: Shared, c: Company | undefined, pic: string | null = null, che
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="${FONT}">
 <rect width="1200" height="630" fill="#000"/>
 <text x="56" y="70" font-size="26" font-weight="800" letter-spacing="4" fill="#e7e9ea">TRADEX</text>
-<text x="1144" y="70" font-size="22" fill="#71767b" text-anchor="end">${esc(settings().instance_name)} Markets · Equicoins</text>
+<text x="1144" y="70" font-size="22" fill="#71767b" text-anchor="end">${esc(settings().instance_name)} Markets · Money</text>
 ${face}<text x="${tx}" y="${c ? 128 : 132}" font-size="34" font-weight="700" fill="#e7e9ea">${head}</text>
 <text x="${tx}" y="${c ? 166 : 168}" font-size="24" fill="#71767b">${sub}</text>
-<text x="56" y="${c ? 232 : 222}" font-size="52" font-weight="800" fill="#ffffff">${value}<tspan font-size="22" font-weight="600" fill="#71767b" dx="14">Equicoins</tspan></text>
+<text x="56" y="${c ? 232 : 222}" font-size="52" font-weight="800" fill="#ffffff">${value}</text>
 ${pill}${chart}
 <text x="1144" y="610" font-size="20" fill="#71767b" text-anchor="end">${esc(OWN_HOST)}${MARKETS_PATH}${c ? `?c=${esc(c.ticker)}` : ""}</text>
 </svg>`;
@@ -774,7 +774,7 @@ export async function marketsRoute(req: Request, p: string, viewer: Viewer | und
 			return json(await state(viewer));
 		}
 		if (what === "accept") {
-			if (!moneyOn()) throw new Refusal("Equicoins is off");
+			if (!moneyOn()) throw new Refusal("Money is off");
 			await acceptDisclaimer(viewer.id);
 			return json(await state(viewer));
 		}

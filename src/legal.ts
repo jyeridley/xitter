@@ -51,7 +51,7 @@ function defaultTerms(): Section[] {
 			"Everyone must follow the rules published at /rules. We may hide or remove content, give strikes, and restrict, limit or suspend accounts that break them. You can appeal a decision from your account's notices page.",
 		]],
 		...(s.features.money
-			? ([["6. Virtual currency", ["Equicoins and anything obtained with them are virtual items with no monetary value. They cannot be sold, exchanged for money or paid out, and we may adjust or reverse them at any time."]]] as Section[])
+			? ([["6. Virtual currency", ["Money and anything obtained with it are virtual items with no monetary value. They cannot be sold, exchanged for real money or paid out, and we may adjust or reverse them at any time."]]] as Section[])
 			: []),
 		[`${s.features.money ? 7 : 6}. Disclaimer`, [
 			"The service is provided free of charge and \"as is\", without warranties of any kind. It may be unavailable, lose data, change or shut down at any time. To the extent permitted by law, we are not liable for any loss arising from your use of the service.",

@@ -1,4 +1,4 @@
-// Equicoins wallets live on each account's home instance. Signed, idempotent
+// Money wallets live on each account's home instance. Signed, idempotent
 // transfers move money between peers; a local author can earn from remote
 // likes on their posts. A new wallet starts with its home instance's balance.
 // The pages are money-page.ts; the client's side is money-ui.ts.
@@ -82,13 +82,13 @@ export async function balanceOf(userId: string): Promise<number> {
 	return Number(w.balance_cents);
 }
 
-// what an account accepts before Equicoins opens, on the page and through the API
+// what an account accepts before Money opens, on the page and through the API
 export const disclaimerText = () => {
-	const instance = settings().instance_name, name = `${instance} Equicoins`;
+	const instance = settings().instance_name, name = `${instance} Money`;
 	return `${name} is virtual currency for use on this instance and participating Xitter instances. It has no real-world monetary value, is not legal tender, and cannot be exchanged for real money, cryptocurrency, or other monetary assets. It is for entertainment and platform use only.`;
 };
 
-// the disclaimer, accepted once per account before Equicoins opens (money-page.ts)
+// the disclaimer, accepted once per account before Money opens (money-page.ts)
 export async function disclaimerAccepted(userId: string): Promise<boolean> {
 	await ensureWallet(userId);
 	const [w] = await sql`select disclaimer_at is not null as ok from money_wallets where user_id = ${userId}::bigint`;
@@ -294,7 +294,7 @@ export async function moveBalance(userId: string, to: string) {
 	if (!feature("money") || !settings().money.move_balance) return;
 	const dest = await accountFor(to);
 	if (!dest?.instance || !dest.remote_id) {
-		console.error(`Equicoins: no account @${to} to move a balance to`);
+		console.error(`Money: no account @${to} to move a balance to`);
 		return;
 	}
 	await sql.begin(async (tx) => {
@@ -310,7 +310,7 @@ export async function moveBalance(userId: string, to: string) {
 	});
 }
 
-// Merchant mode (Settings > Equicoins): for gold organisations, payments to them
+// Merchant mode (Settings > Money): for gold organisations, payments to them
 // read as purchases, with the name they choose and, if they like, their banner
 export async function merchantOf(userId: string) {
 	const [m] = await sql`select u.verified_type = 'business' as gold, m.user_id is not null as on, coalesce(m.name, '') as name, coalesce(m.show_banner, true) as show_banner
@@ -378,8 +378,8 @@ export const badges = (p: Pick<Party, "badge" | "org">) =>
 	(p.badge && BADGE_COLOR[p.badge] ? `<svg class="xm-badge" viewBox="0 0 22 22" role="img" aria-label="${BADGE_LABEL[p.badge]}"><path fill="${BADGE_COLOR[p.badge]}" d="${BADGE_PATH}"/></svg>` : "") +
 	(p.org ? `<img class="xm-org" src="${esc(p.org.avatar)}" alt="${esc(p.org.name)}" title="${esc(p.org.name)}">` : "");
 export const face = (p: Party, cls = "") => `<img class="${cls}${p.square ? " xm-sq" : ""}" src="${esc(p.avatar)}" alt="">`;
-// "with [$] Equicoins", where X writes "with my X Card"
-export const MONEY_WORDMARK = `<span class="xm-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${MONEY_ICON}"/></svg>Equicoins</span>`;
+// "with [$] Money", where X writes "with my X Card"
+export const MONEY_WORDMARK = `<span class="xm-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${MONEY_ICON}"/></svg>Money</span>`;
 
 // ---- payments
 
@@ -537,14 +537,14 @@ export async function paymentCards(posts: { authorId: string; text: string }[]):
 			title = byFeed
 				? `${t.sender.name} sent ${shortCents(t.amount)} to ${t.recipient.merchant?.name ?? t.recipient.name}`
 				: t.recipient.merchant ? `${shortCents(t.amount)} at ${t.recipient.merchant.name}` : mine ? `${shortCents(t.amount)} sent to ${t.recipient.name}` : `${shortCents(t.amount)} from ${t.sender.name}`;
-			description = t.note && !byFeed ? `“${t.note}”` : `${settings().instance_name} Equicoins · ${date(t.at)}`;
+			description = t.note && !byFeed ? `“${t.note}”` : `${settings().instance_name} Money · ${date(t.at)}`;
 			image = mine ? t.recipient.avatar : t.sender.avatar;
 			url = paymentUrl(id);
 		} else {
 			const q = asked.get(id);
 			if (!q || p.authorId !== q.requester.id) continue;
 			title = `Pay ${q.requester.merchant ? q.requester.merchant.name : `@${q.requester.screen_name}`}${q.amount ? ` ${shortCents(q.amount)}` : ""}`;
-			description = q.note || `with ${settings().instance_name} Equicoins`;
+			description = q.note || `with ${settings().instance_name} Money`;
 			image = q.requester.avatar;
 			url = requestUrl(id);
 		}
@@ -612,7 +612,7 @@ export async function recentApi(viewer: Viewer): Promise<Response> {
 
 // POST payme: the viewer's plain "Pay @name" card, made the first time
 export async function payMeApi(viewer: Viewer): Promise<Response> {
-	if (!feature("money") || viewer.actor || viewer.instance) return Response.json({ error: "Equicoins isn't available." }, { status: 403 });
+	if (!feature("money") || viewer.actor || viewer.instance) return Response.json({ error: "Money isn't available." }, { status: 403 });
 	try {
 		return Response.json({ url: requestUrl(await requestMoney(viewer.id, "", "", "")) });
 	} catch (e) {

@@ -183,8 +183,8 @@ ${ads.length ? `${tiles([
 	.map(([k, f]) => `<a href="/account/ads?show=${k}"${k === show ? ' aria-current="page"' : ""}>${f.label} ${counts[k] ? `<span class="dim">${counts[k]}</span>` : ""}</a>`)
 	.join("")}</nav>
 ${listed.length ? `<div class="list">${listed.map(row).join("")}</div>` : `<p class="dim empty">No ${FILTERS[show].label.toLowerCase()} campaigns.</p>`}`
-	: `<div class="panel empty"><h2>Run your first campaign</h2><p class="dim">Promote one of your posts, or write an ad that shows only in timelines. You pay in Equicoins, and staff review every campaign before it runs.</p><a class="button" href="/account/ads/new">Create campaign</a></div>`}
-<p class="dim">You have ${formatCents(balance)} Equicoins. Don't want to see ads? <a href="/account/labels">Hide them for free</a>.</p>`;
+	: `<div class="panel empty"><h2>Run your first campaign</h2><p class="dim">Promote one of your posts, or write an ad that shows only in timelines. You pay with Money, and staff review every campaign before it runs.</p><a class="button" href="/account/ads/new">Create campaign</a></div>`}
+<p class="dim">You have ${formatCents(balance)} to spend. Don't want to see ads? <a href="/account/labels">Hide them for free</a>.</p>`;
 	return accountPage({ req, viewer, title: "Ads Manager", css: CSS, body, status: opts.error ? 400 : 200 });
 }
 
@@ -254,7 +254,7 @@ ${notices(opts)}${busy ? `<p class="card warning">That post is already in a camp
 <div class="preview"><div class="avatar"${viewer.avatar_url ? ` style="background-image:url(&quot;${esc(viewer.avatar_url)}&quot;)"` : ""}></div><div><div class="who"><b>${esc(viewer.name)}</b><span>@${esc(viewer.screen_name)}</span></div><p id="pvtext"></p><div class="tag">Ad</div></div></div>
 </section>
 <section><h2>Budget and schedule</h2>
-<div class="pair"><div><label for="budget">Budget in Equicoins</label><input id="budget" name="budget" inputmode="decimal" placeholder="${(min / 100).toFixed(2)}" value="${esc(d.budget ?? "")}">
+<div class="pair"><div><label for="budget">Budget (Money)</label><input id="budget" name="budget" inputmode="decimal" placeholder="${(min / 100).toFixed(2)}" value="${esc(d.budget ?? "")}">
 <div class="presets">${budgets.map((c) => `<button type="button" class="secondary" data-set="budget" data-v="${(c / 100).toFixed(2)}">${formatCents(c)}</button>`).join("")}</div></div>
 <div><label for="days">Days</label><input id="days" name="days" type="number" min="1" max="${rules.max_days}" value="${esc(d.days ?? String(Math.min(7, rules.max_days)))}">
 <div class="presets">${dayChoices.map((n) => `<button type="button" class="secondary" data-set="days" data-v="${n}">${plural(n, "day")}</button>`).join("")}</div></div></div>
@@ -331,7 +331,7 @@ ${ad.postId && ad.status !== "pending" ? `<a href="/i/status/${ad.postId}">Open 
 <div class="panel"><h2>Details</h2><dl>${facts.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
 <details><summary>Rename</summary><form method="post" action="/account/ads/${ad.id}">${hidden(viewer.csrf, "rename")}<label for="name">Campaign name</label><input id="name" name="name" maxlength="60" value="${esc(ad.name ?? "")}" placeholder="${esc(title(ad))}"><button type="submit" class="secondary">Save name</button></form></details>
 ${live ? `<details><summary>Add budget or days</summary><form method="post" action="/account/ads/${ad.id}">${hidden(viewer.csrf, "extend")}
-<div class="pair"><div><label for="ab">Add Equicoins</label><input id="ab" name="budget" inputmode="decimal" placeholder="0.00"></div>
+<div class="pair"><div><label for="ab">Add money</label><input id="ab" name="budget" inputmode="decimal" placeholder="0.00"></div>
 <div><label for="ad">Add days</label><input id="ad" name="days" type="number" min="0" max="${roomDays}" placeholder="0"${roomDays < 1 ? " disabled" : ""}></div></div>
 <button type="submit">Extend campaign</button></form></details>` : ""}
 </div>`;
