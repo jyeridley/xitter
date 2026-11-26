@@ -482,6 +482,29 @@ export const TIDY_SCRIPT = `(function(){
 			row.parentNode.insertBefore(box,row);
 		});
 	}
+	// on a phone the side bar's entries live in the drawer (the avatar's menu):
+	// a copy of its Bookmarks link for each, placed above it
+	function drawerLinks(){
+		var items=(T.links||[]).filter(function(l){return l.where==="nav"});
+		var tpl=document.querySelector('[role="dialog"] a[href="/i/bookmarks"]');
+		if(!items.length||!tpl||!tpl.closest('[role="dialog"]').querySelector('a[href="/logout"],[data-testid="logout"]'))return;
+		// the link shares a row with others; each copy gets a row of its own above it
+		var row=tpl.parentNode,box=row.parentNode;
+		items.forEach(function(l){
+			if(box.querySelector('a[data-xitter-drawer="'+l.href+'"]'))return;
+			var a=tpl.cloneNode(true);
+			a.removeAttribute("data-testid");a.setAttribute("data-xitter-drawer",l.href);a.setAttribute("aria-label",l.text);
+			leave(a,l.href);
+			var label=[].find.call(a.querySelectorAll("span"),function(n){return !n.childElementCount&&n.textContent.trim()});
+			if(label)label.textContent=l.text;
+			var svg=a.querySelector("svg"),path=svg&&svg.querySelector("path");
+			if(path){[].slice.call(svg.querySelectorAll("path")).slice(1).forEach(function(p){p.remove()});path.removeAttribute("fill-rule");path.removeAttribute("clip-rule");path.setAttribute("d",l.icon);svg.setAttribute("viewBox",l.viewBox||"0 0 24 24")}
+			// the drawer shuts itself when one of its own links is followed
+			a.addEventListener("click",function(){var d=a.closest('[role="dialog"]');var mask=d&&d.parentNode&&[].find.call(d.parentNode.children,function(c){return c!==d&&getComputedStyle(c).position==="fixed"});if(mask)mask.click();else document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}))});
+			var wrap=document.createElement("div");wrap.style.display="flex";wrap.appendChild(a);
+			box.insertBefore(wrap,row);
+		});
+	}
 	// the side bar's entries: a copy of its Profile link, placed above it
 	function navLinks(){
 		var items=(T.links||[]).filter(function(l){return l.where==="nav"});
@@ -608,6 +631,7 @@ export const TIDY_SCRIPT = `(function(){
 		footer();
 		menuLinks();
 		navLinks();
+		drawerLinks();
 		accountRows();
 		twoFactorRow();
 		navWidth();

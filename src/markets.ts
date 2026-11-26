@@ -1,8 +1,10 @@
-// TradeX, Jye's play stock market, at /i/markets: staff (the admin role) list
-// companies, prices drift a little every two seconds, and every signed-in
-// account trades with $5,000 of play cash it gets on its first visit. Everyone
-// sees the same market (Postgres); signed out, it's read-only. A port of Jye's
-// one-file tradex.html, whose page script is markets-client.js.
+// TradeX, Jye's play stock market, at /i/markets: staff (the admin role) and
+// accounts with a blue or gold checkmark list companies, prices drift a little
+// every two seconds, and every signed-in account trades with its Equicoins
+// (money.ts: the wallet's balance is the cash; a buy takes from it and a sale
+// pays into it, in the same transaction as the shares). Everyone sees the same
+// market (Postgres); signed out, or with Equicoins off, it's read-only. A port
+// of Jye's one-file tradex.html, whose page script is markets-client.js.
 //
 // Like the election page (election.ts), a browser opening /i/markets gets it
 // inside the client with its side bars (tidy.ts frames /i/markets/embed in the
@@ -13,13 +15,20 @@ import { join } from "node:path";
 import type { Viewer } from "./auth";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
+import { hateIn } from "./hate";
+import { avatarSrc } from "./model";
+import { acceptDisclaimer, balanceOf, disclaimerAccepted, disclaimerText, economy } from "./money";
 import { hit, limitedResponse } from "./ratelimit";
-import { settings } from "./settings";
+import { feature, hasBlockedPhrase, settings } from "./settings";
+import { MONEY_ICON } from "./tidy";
 
 export const MARKETS_PATH = "/i/markets";
 const API = `${MARKETS_PATH}/api/`;
 const OWN_HOST = new URL(PUBLIC_ORIGIN).host;
-const START_CASH = 5000;
+// what an account with a blue or gold checkmark may list (staff list any number)
+export const SECTORS = ["Food & Drink", "Retail", "Technology", "Energy", "Transport", "Real Estate", "Finance", "Entertainment", "Health", "Industrial", "Services", "Other"];
+const OWN_MAX = 2;
+const LISTERS = ["blue", "business"]; // blue and gold checkmarks
 const HIST = 500; // price points kept per company (the original's cap)
 const HIST_SENT = 200; // the most the page draws (its widest range)
 const INDEX = 300; // market-cap points kept
@@ -35,6 +44,8 @@ const big = (n: number) => (n >= 1e12 ? "$" + (n / 1e12).toFixed(2) + "T" : n >=
 const pct = (a: number, b: number) => (b ? ((a - b) / b) * 100 : 0);
 const sg = (x: number) => (x >= 0 ? "+" : "") + x.toFixed(2) + "%";
 const isAdmin = (v: Viewer | undefined) => v?.role === "admin";
+const moneyOn = () => feature("money");
+const coinName = () => `${settings().instance_name} Equicoins`;
 
 // ---------- the market's clock ----------
 
@@ -84,13 +95,16 @@ async function reprice(id: string, ticker: string, price: number, why: string, v
 
 // ---------- what the page draws ----------
 
-type Company = { id: string; name: string; ticker: string; logo: string; price: number; prevClose: number; shares: number; volume: number; listed: number; suspended: boolean; hist: [number, number][] };
+type Owner = { id: string; handle: string; name: string; badge: string | null; avatar: string };
+type Company = { id: string; name: string; ticker: string; logo: string; price: number; prevClose: number; shares: number; volume: number; listed: number; suspended: boolean; sector: string; description: string; owner: Owner | null; hist: [number, number][] };
 type Shared = { companies: Company[]; index: [number, number][]; headlines: any[]; events: any[]; gap: number };
 let cache: { key: number; at: number; value: Promise<Shared> } | undefined;
 
 async function loadShared(): Promise<Shared> {
 	const [rows, hist, index, headlines, events, gap] = await Promise.all([
-		sql`select id::text, name, ticker, logo_v, logo is not null as has_logo, price::float8, prev_close::float8, shares::float8, volume::float8, (extract(epoch from listed_at) * 1000)::float8 as listed, suspended from market_companies order by id`,
+		sql`select c.id::text, c.name, c.ticker, c.logo_v, c.logo is not null as has_logo, c.price::float8, c.prev_close::float8, c.shares::float8, c.volume::float8, (extract(epoch from c.listed_at) * 1000)::float8 as listed, c.suspended,
+			coalesce(c.sector, '') as sector, coalesce(c.description, '') as description, u.id::text as owner_id, u.screen_name as owner_handle, u.name as owner_name, u.verified_type as owner_badge, u.avatar_url as owner_avatar
+			from market_companies c left join users u on u.id = c.owner_id and u.status <> 'suspended' and u.deactivated_at is null order by c.id`,
 		sql`select company_id::text as c, (extract(epoch from t) * 1000)::float8 as t, price::float8 as p from (select company_id, t, price, id, row_number() over (partition by company_id order by id desc) rn from market_history) x where rn <= ${HIST_SENT} order by company_id, id`,
 		sql`select (extract(epoch from t) * 1000)::float8 as t, value from (select * from market_index order by id desc limit ${INDEX}) x order by id`,
 		sql`select id::text, text, cat, ticker, breaking, (extract(epoch from created_at) * 1000)::float8 as t from market_headlines order by id desc limit 100`,
@@ -103,6 +117,8 @@ async function loadShared(): Promise<Shared> {
 		companies: rows.map((c: any) => ({
 			id: c.id, name: c.name, ticker: c.ticker, logo: c.has_logo ? `${MARKETS_PATH}/logo/${c.id}?v=${c.logo_v}` : "",
 			price: c.price, prevClose: c.prev_close, shares: c.shares, volume: c.volume, listed: c.listed, suspended: c.suspended,
+			sector: c.sector, description: c.description,
+			owner: c.owner_id ? { id: c.owner_id, handle: c.owner_handle, name: c.owner_name, badge: c.owner_badge ?? null, avatar: avatarSrc(c.owner_avatar) ?? "/abs/sticky/default_profile_images/default_profile_normal.png" } : null,
 			hist: byCo.get(c.id) ?? [],
 		})),
 		index: index.map((x: any) => [x.t, x.value]),
@@ -121,18 +137,27 @@ function shared(): Promise<Shared> {
 	return cache.value;
 }
 
-// an account's play money, opened with $5,000 on its first visit
+// an account's side of the market: its Equicoins (money.ts) are its cash
 async function account(viewer: Viewer) {
-	await sql`insert into market_accounts (user_id, cash) values (${viewer.id}, ${START_CASH}) on conflict do nothing`;
-	const [[a], holdings, txns] = await Promise.all([
-		sql`select cash::float8, (extract(epoch from created_at) * 1000)::float8 as created from market_accounts where user_id = ${viewer.id}`,
+	const on = moneyOn();
+	const [[u], holdings, txns, [owned]] = await Promise.all([
+		sql`select verified_type, status from users where id = ${viewer.id}`,
 		sql`select company_id::text as id, qty, cost from market_holdings where user_id = ${viewer.id}`,
-		sql`select side, ticker, qty, price::float8, total::float8, (extract(epoch from created_at) * 1000)::float8 as t from market_txns where user_id = ${viewer.id} order by id desc limit 100`,
+		sql`select side, ticker, qty, price::float8, coalesce(total_cents::float8 / 100, total::float8) as total, (extract(epoch from created_at) * 1000)::float8 as t from market_txns where user_id = ${viewer.id} order by id desc limit 100`,
+		sql`select count(*)::int as n from market_companies where owner_id = ${viewer.id}`,
 	]);
+	// the wallet is only made (with the instance's starting balance) once Equicoins is on
+	const cents = on ? await balanceOf(viewer.id) : null;
+	const accepted = on ? await disclaimerAccepted(viewer.id) : false;
+	const canList = LISTERS.includes(u?.verified_type) && u?.status !== "restricted" && u?.status !== "suspended";
 	return {
 		handle: viewer.screen_name,
-		cash: a.cash,
-		created: a.created,
+		cash: cents === null ? null : cents / 100,
+		accepted,
+		badge: u?.verified_type ?? null,
+		canList: canList || isAdmin(viewer),
+		owned: owned.n,
+		ownMax: isAdmin(viewer) ? null : OWN_MAX,
 		holdings: Object.fromEntries(holdings.map((h: any) => [h.id, { qty: h.qty, cost: h.cost }])),
 		txns,
 	};
@@ -140,42 +165,111 @@ async function account(viewer: Viewer) {
 
 async function state(viewer: Viewer | undefined) {
 	const [s, me] = await Promise.all([shared(), viewer ? account(viewer) : null]);
-	return { ...s, me, admin: isAdmin(viewer), instance: settings().instance_name };
+	const on = moneyOn();
+	return {
+		...s, me, admin: isAdmin(viewer), instance: settings().instance_name,
+		money: { on, name: coinName(), disclaimer: on && me && !me.accepted ? disclaimerText() : null },
+		sectors: SECTORS,
+	};
 }
 
 // ---------- trading ----------
 
-class Refusal extends Error {}
+class Refusal extends Error {
+	constructor(message: string, readonly status = 400) {
+		super(message);
+	}
+}
 
+// A buy takes its Equicoins from the wallet and a sale pays into it, in one
+// transaction with the shares: the company's row, then the wallet, then the
+// holding are locked, so two orders at once can't spend the same coins.
 async function trade(viewer: Viewer, body: any) {
+	if (!moneyOn()) throw new Refusal("Trading opens once Equicoins is turned on.");
 	const side = body?.side === "sell" ? "sell" : body?.side === "buy" ? "buy" : null;
 	const q = Math.floor(Number(body?.qty));
 	if (!side) throw new Refusal("Choose buy or sell");
 	if (!(q > 0) || q > 1e9) throw new Refusal("Enter a quantity");
-	await sql`insert into market_accounts (user_id, cash) values (${viewer.id}, ${START_CASH}) on conflict do nothing`;
+	const [me] = await sql`select status from users where id = ${viewer.id}`;
+	if (me?.status === "restricted") throw new Refusal("Your account can't trade right now.");
+	if (!(await disclaimerAccepted(viewer.id))) throw new Refusal(`Accept the ${coinName()} terms first.`);
 	await sql.begin(async (tx) => {
-		const [c] = await tx`select id::text, ticker, price::float8, suspended from market_companies where id = ${String(body?.id ?? "0").replace(/\D/g, "") || "0"} for update`;
+		const [c] = await tx`select id::text, ticker, price::float8, suspended from market_companies where id = ${idOf(body?.id)} for update`;
 		if (!c) throw new Refusal("Company not found");
 		if (c.suspended) throw new Refusal("This listing is suspended");
-		const [a] = await tx`select cash::float8 from market_accounts where user_id = ${viewer.id} for update`;
-		const cost = Math.round(q * c.price * 100) / 100;
+		await tx`insert into money_wallets (user_id, balance_cents) values (${viewer.id}::bigint, ${economy().starting_cents}) on conflict (user_id) do nothing`;
+		const [w] = await tx`select balance_cents::bigint as cents from money_wallets where user_id = ${viewer.id}::bigint for update`;
+		const cents = Math.round(q * c.price * 100);
+		if (!Number.isSafeInteger(cents)) throw new Refusal("That order is too big");
 		if (side === "buy") {
-			if (cost > a.cash) throw new Refusal("Insufficient cash");
-			await tx`update market_accounts set cash = cash - ${cost} where user_id = ${viewer.id}`;
-			await tx`insert into market_holdings (user_id, company_id, qty, cost) values (${viewer.id}, ${c.id}, ${q}, ${cost})
+			if (cents > Number(w.cents)) throw new Refusal("You don't have enough Equicoins for that.");
+			await tx`update money_wallets set balance_cents = balance_cents - ${cents} where user_id = ${viewer.id}::bigint`;
+			await tx`insert into market_holdings (user_id, company_id, qty, cost) values (${viewer.id}, ${c.id}, ${q}, ${cents / 100})
 				on conflict (user_id, company_id) do update set qty = market_holdings.qty + excluded.qty, cost = market_holdings.cost + excluded.cost`;
 		} else {
 			const [h] = await tx`select qty, cost from market_holdings where user_id = ${viewer.id} and company_id = ${c.id} for update`;
-			if (!h || h.qty < q) throw new Refusal("Insufficient shares");
+			if (!h || h.qty < q) throw new Refusal("You don't have that many shares");
 			const avg = h.cost / h.qty;
 			if (h.qty - q < 0.0001) await tx`delete from market_holdings where user_id = ${viewer.id} and company_id = ${c.id}`;
 			else await tx`update market_holdings set qty = qty - ${q}, cost = cost - ${avg * q} where user_id = ${viewer.id} and company_id = ${c.id}`;
-			await tx`update market_accounts set cash = cash + ${cost} where user_id = ${viewer.id}`;
+			await tx`update money_wallets set balance_cents = balance_cents + ${cents} where user_id = ${viewer.id}::bigint`;
 		}
 		await tx`update market_companies set volume = volume + ${q} where id = ${c.id}`;
-		await tx`insert into market_txns (user_id, side, ticker, qty, price, total) values (${viewer.id}, ${side}, ${c.ticker}, ${q}, ${c.price}, ${cost})`;
+		await tx`insert into market_txns (user_id, side, ticker, qty, price, total, total_cents) values (${viewer.id}, ${side}, ${c.ticker}, ${q}, ${c.price}, ${cents / 100}, ${cents})`;
 	});
 	changed++;
+}
+
+// ---------- listing: accounts with a blue or gold checkmark, and staff ----------
+
+function cleanText(v: unknown, max: number) {
+	const t = String(v ?? "").replace(/\s+/g, " ").trim();
+	if ([...t].length > max) throw new Refusal(`Keep it under ${max} characters`);
+	if (t && (hateIn(t) || hasBlockedPhrase(t))) throw new Refusal("That text can't be used here");
+	return t;
+}
+async function register(viewer: Viewer, b: any) {
+	const [u] = await sql`select verified_type, status from users where id = ${viewer.id}`;
+	if (!LISTERS.includes(u?.verified_type)) throw new Refusal("Only accounts with a blue or gold checkmark can list a company.", 403);
+	if (u.status === "restricted" || u.status === "suspended") throw new Refusal("Your account can't list a company right now.", 403);
+	const name = cleanText(b.name, 50), tk = String(b.ticker ?? "").trim().toUpperCase();
+	const sector = SECTORS.includes(b.sector) ? b.sector : null;
+	const description = cleanText(b.description, 200);
+	const price = Number(b.price), sh = Math.floor(Number(b.shares));
+	if ([...name].length < 2) throw new Refusal("Give the company a name");
+	if (!/^[A-Z]{2,5}$/.test(tk)) throw new Refusal("Tickers are 2 to 5 letters");
+	if (!sector) throw new Refusal("Choose a sector");
+	if (description.length < 10) throw new Refusal("Describe the company in a sentence");
+	if (!(price >= 0.1 && price <= 1000)) throw new Refusal("The starting price is between $0.10 and $1,000");
+	if (!(sh >= 1000 && sh <= 10_000_000)) throw new Refusal("Shares outstanding are between 1,000 and 10,000,000");
+	const logo = logoOf(b.logo);
+	const p = Math.round(price * 100) / 100;
+	await sql.begin(async (tx) => {
+		// one account's listings counted under a lock of its own, so two at once can't both fit
+		await tx`select pg_advisory_xact_lock(hashtext(${`market-list:${viewer.id}`}))`;
+		const [n] = await tx`select count(*)::int as n from market_companies where owner_id = ${viewer.id}`;
+		if (n.n >= OWN_MAX) throw new Refusal(`You can list up to ${OWN_MAX} companies`);
+		const [c] = await tx`insert into market_companies (name, ticker, price, prev_close, shares, logo, logo_type, owner_id, sector, description)
+			values (${name}, ${tk}, ${p}, ${p}, ${sh}, ${logo?.bytes ?? null}, ${logo?.type ?? null}, ${viewer.id}, ${sector}, ${description}) on conflict (ticker) do nothing returning id`;
+		if (!c) throw new Refusal("That ticker is taken");
+		await tx`insert into market_history (company_id, price) values (${c.id}, ${p})`;
+	});
+	await log(`REGISTERED ${tk}`, viewer);
+}
+// a company's founder (or staff) keeps its name, sector, line and logo up to date
+async function editCompany(viewer: Viewer, b: any) {
+	const [c] = await sql`select id::text, ticker, owner_id::text from market_companies where id = ${idOf(b.id)}`;
+	if (!c) throw new Refusal("Company not found", 404);
+	if (c.owner_id !== viewer.id && !isAdmin(viewer)) throw new Refusal("Only its founder can edit this company", 403);
+	const name = cleanText(b.name, 50), description = cleanText(b.description, 200);
+	const sector = SECTORS.includes(b.sector) ? b.sector : null;
+	if ([...name].length < 2) throw new Refusal("Give the company a name");
+	if (!sector) throw new Refusal("Choose a sector");
+	const logo = b.clearLogo ? null : logoOf(b.logo);
+	await sql`update market_companies set name = ${name}, sector = ${sector}, description = ${description} where id = ${c.id}`;
+	if (logo) await sql`update market_companies set logo = ${logo.bytes}, logo_type = ${logo.type}, logo_v = logo_v + 1 where id = ${c.id}`;
+	else if (b.clearLogo) await sql`update market_companies set logo = null, logo_type = null, logo_v = logo_v + 1 where id = ${c.id}`;
+	await log(`EDITED ${c.ticker}`, viewer);
 }
 
 // ---------- staff ----------
@@ -206,8 +300,9 @@ const ADMIN: Record<string, (b: any, v: Viewer) => Promise<unknown>> = {
 		if (price > 1e12 || sh > 1e15) throw new Refusal("That's too big a number");
 		const logo = logoOf(b.logo);
 		const p = Math.round(price * 100) / 100;
-		const [c] = await sql`insert into market_companies (name, ticker, price, prev_close, shares, logo, logo_type)
-			values (${name}, ${tk}, ${p}, ${p}, ${sh}, ${logo?.bytes ?? null}, ${logo?.type ?? null}) on conflict (ticker) do nothing returning id`;
+		const sector = SECTORS.includes(b.sector) ? b.sector : null, description = cleanText(b.description, 200) || null;
+		const [c] = await sql`insert into market_companies (name, ticker, price, prev_close, shares, logo, logo_type, sector, description)
+			values (${name}, ${tk}, ${p}, ${p}, ${sh}, ${logo?.bytes ?? null}, ${logo?.type ?? null}, ${sector}, ${description}) on conflict (ticker) do nothing returning id`;
 		if (!c) throw new Refusal("Ticker already listed");
 		await sql`insert into market_history (company_id, price) values (${c.id}, ${p})`;
 		await log("LISTED " + tk, v);
@@ -293,11 +388,13 @@ const ADMIN: Record<string, (b: any, v: Viewer) => Promise<unknown>> = {
 	},
 	async scandal(_b, v) {
 		await sql.begin(async (tx) => {
-			await tx`update market_accounts a set cash = a.cash + s.v from (select h.user_id, sum(c.price::float8 * h.qty * 0.5) v from market_holdings h join market_companies c on c.id = h.company_id group by h.user_id) s where s.user_id = a.user_id`;
+			// the half each investor pulls out is paid into their Equicoins
+			await tx`insert into money_wallets (user_id, balance_cents) select distinct user_id, 0 from market_holdings on conflict (user_id) do nothing`;
+			await tx`update money_wallets w set balance_cents = w.balance_cents + s.v from (select h.user_id, round(sum(c.price::float8 * h.qty * 0.5) * 100)::bigint v from market_holdings h join market_companies c on c.id = h.company_id group by h.user_id) s where s.user_id = w.user_id`;
 			await tx`update market_holdings set qty = qty * 0.5, cost = cost * 0.5`;
 			await tx`delete from market_holdings where qty < 0.0001`;
 		});
-		await event("Political Scandal", "Half of all holdings pulled out to cash", v);
+		await event("Political Scandal", "Half of all holdings pulled out to Equicoins", v);
 	},
 	// Headlines
 	async headline(b, v) {
@@ -322,10 +419,11 @@ const ADMIN: Record<string, (b: any, v: Viewer) => Promise<unknown>> = {
 
 async function adminData() {
 	const [accounts, logs] = await Promise.all([
-		sql`select u.screen_name, u.name, a.cash::float8, (extract(epoch from a.created_at) * 1000)::float8 as created,
-			(select count(*)::int from market_holdings h where h.user_id = a.user_id) as positions,
-			(select coalesce(sum(h.qty * c.price::float8), 0)::float8 from market_holdings h join market_companies c on c.id = h.company_id where h.user_id = a.user_id) as equity
-			from market_accounts a join users u on u.id = a.user_id order by a.created_at`,
+		// everyone who has traded, with their Equicoins balance
+		sql`select u.screen_name, u.name, coalesce(w.balance_cents, 0)::float8 / 100 as cash, (extract(epoch from i.first) * 1000)::float8 as created,
+			(select count(*)::int from market_holdings h where h.user_id = i.user_id) as positions,
+			(select coalesce(sum(h.qty * c.price::float8), 0)::float8 from market_holdings h join market_companies c on c.id = h.company_id where h.user_id = i.user_id) as equity
+			from (select user_id, min(created_at) as first from market_txns group by user_id) i join users u on u.id = i.user_id left join money_wallets w on w.user_id = i.user_id order by i.first`,
 		sql`select action as a, (extract(epoch from created_at) * 1000)::float8 as t from market_logs order by id desc limit ${LOGS}`,
 	]);
 	return { accounts, logs };
@@ -350,10 +448,10 @@ function describeMarket(s: Shared) {
 	const all = s.companies, L = all.filter((c) => !c.suspended);
 	if (!all.length) return "No companies are listed yet.";
 	const mc = all.reduce((t, c) => t + c.price * c.shares, 0), base = all.reduce((t, c) => t + c.prevClose * c.shares, 0);
-	return `Total market cap ${big(mc)} (${sg(pct(mc, base))}) · ${all.length} listed compan${all.length === 1 ? "y" : "ies"}, ${L.length} active.`;
+	return `Total market cap ${big(mc)} Equicoins (${sg(pct(mc, base))}) · ${all.length} listed compan${all.length === 1 ? "y" : "ies"}, ${L.length} active.`;
 }
 function describeCompany(c: Company) {
-	return `${c.name} (${c.ticker}) ${fmt(c.price)} ${sg(pct(c.price, c.prevClose))} · market cap ${big(c.price * c.shares)} · volume ${c.volume.toLocaleString("en-US")}${c.suspended ? " · SUSPENDED" : ""}`;
+	return `${c.name} (${c.ticker}) ${fmt(c.price)} Equicoins ${sg(pct(c.price, c.prevClose))} · market cap ${big(c.price * c.shares)} · volume ${c.volume.toLocaleString("en-US")}${c.sector ? ` · ${c.sector}` : ""}${c.owner ? ` · founded by @${c.owner.handle}` : ""}${c.suspended ? " · SUSPENDED" : ""}`;
 }
 
 async function page(req: Request, viewer: Viewer | undefined): Promise<Response> {
@@ -382,7 +480,7 @@ async function page(req: Request, viewer: Viewer | undefined): Promise<Response>
 		["name", "description", desc],
 	].map(([a, k, c]) => `<meta ${a}="${k}" content="${esc(c)}">`).join("\n");
 	const f = clientFiles();
-	const boot = JSON.stringify({ state: st, csrf: viewer?.csrf ?? null, signedIn: !!viewer }).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+	const boot = JSON.stringify({ state: st, csrf: viewer?.csrf ?? null, signedIn: !!viewer, coin: MONEY_ICON }).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
 	const html = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${esc(title)} · ${esc(name)}</title>
@@ -419,16 +517,16 @@ function ogSvg(s: Shared, c: Company | undefined): string {
 		chart = `<g transform="translate(56 300)"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${col}" stop-opacity=".4"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs><polygon points="0,${H} ${line} ${W},${H}" fill="url(#g)"/><polyline fill="none" stroke="${col}" stroke-width="4" stroke-linejoin="round" points="${line}"/></g>`;
 	}
 	const head = c ? `${esc(c.ticker)}` : "Total market cap";
-	const sub = c ? esc(c.name) + (c.suspended ? " · SUSPENDED" : "") : all.length ? `${all.length} listed compan${all.length === 1 ? "y" : "ies"}` : "No companies listed yet";
+	const sub = c ? esc(c.name) + (c.sector ? ` · ${esc(c.sector)}` : "") + (c.owner ? ` · @${esc(c.owner.handle)}` : "") + (c.suspended ? " · SUSPENDED" : "") : all.length ? `${all.length} listed compan${all.length === 1 ? "y" : "ies"}` : "No companies listed yet";
 	const value = c ? fmt(c.price) : big(mc);
 	const pill = all.length ? `<rect x="56" y="232" width="170" height="44" rx="22" fill="${up ? "#1d3a2a" : "#3a1d1d"}"/><text x="141" y="263" font-size="24" font-weight="700" text-anchor="middle" fill="${up ? "#4ade80" : "#f87171"}">${up ? "▲" : "▼"} ${Math.abs(change).toFixed(2)}%</text>` : "";
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="${FONT}">
 <rect width="1200" height="630" fill="#000"/>
 <text x="56" y="70" font-size="26" font-weight="800" letter-spacing="4" fill="#e7e9ea">TRADEX</text>
-<text x="1144" y="70" font-size="22" fill="#71767b" text-anchor="end">${esc(settings().instance_name)} Markets</text>
+<text x="1144" y="70" font-size="22" fill="#71767b" text-anchor="end">${esc(settings().instance_name)} Markets · Equicoins</text>
 <text x="56" y="132" font-size="34" font-weight="700" fill="#e7e9ea">${head}</text>
 <text x="56" y="168" font-size="24" fill="#71767b">${sub}</text>
-<text x="56" y="222" font-size="52" font-weight="800" fill="#ffffff">${value}</text>
+<text x="56" y="222" font-size="52" font-weight="800" fill="#ffffff">${value}<tspan font-size="22" font-weight="600" fill="#71767b" dx="14">Equicoins</tspan></text>
 ${pill}${chart}
 <text x="1144" y="610" font-size="20" fill="#71767b" text-anchor="end">${esc(OWN_HOST)}${MARKETS_PATH}${c ? `?c=${esc(c.ticker)}` : ""}</text>
 </svg>`;
@@ -515,8 +613,24 @@ export async function marketsRoute(req: Request, p: string, viewer: Viewer | und
 	// writes come from this site's own page, with the session's token
 	if (req.method === "POST" && (req.headers.get("origin") !== PUBLIC_ORIGIN || req.headers.get("x-csrf-token") !== viewer.csrf)) return fail("Reload the page and try again", 403);
 	try {
+		const body = req.method === "POST" ? ((await req.json().catch(() => null)) ?? {}) : {};
 		if (what === "trade") {
-			await trade(viewer, await req.json().catch(() => null));
+			await trade(viewer, body);
+			return json(await state(viewer));
+		}
+		if (what === "accept") {
+			if (!moneyOn()) throw new Refusal("Equicoins is off");
+			await acceptDisclaimer(viewer.id);
+			return json(await state(viewer));
+		}
+		if (what === "register") {
+			await register(viewer, body);
+			changed++;
+			return json(await state(viewer));
+		}
+		if (what === "company") {
+			await editCompany(viewer, body);
+			changed++;
 			return json(await state(viewer));
 		}
 		if (!isAdmin(viewer)) return fail("Staff only", 403);
@@ -524,11 +638,11 @@ export async function marketsRoute(req: Request, p: string, viewer: Viewer | und
 		const action = /^admin\/(\w+)$/.exec(what)?.[1];
 		const run = action && Object.hasOwn(ADMIN, action) ? ADMIN[action] : undefined;
 		if (!run) return fail("not found", 404);
-		await run((await req.json().catch(() => null)) ?? {}, viewer);
+		await run(body, viewer);
 		changed++;
 		return json({ ok: true, state: await state(viewer), admin: await adminData() });
 	} catch (e) {
-		if (e instanceof Refusal) return fail(e.message);
+		if (e instanceof Refusal) return fail(e.message, e.status);
 		console.error("markets", e);
 		return fail("Something went wrong", 500);
 	}
