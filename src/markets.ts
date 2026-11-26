@@ -17,6 +17,8 @@ import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
 import { hateIn } from "./hate";
 import { avatarSrc } from "./model";
+import { serveAvatar } from "./media";
+import { GUEST_ID } from "./blocks";
 import { acceptDisclaimer, balanceOf, disclaimerAccepted, disclaimerText, economy } from "./money";
 import { hit, limitedResponse } from "./ratelimit";
 import { feature, hasBlockedPhrase, settings } from "./settings";
@@ -95,8 +97,17 @@ async function reprice(id: string, ticker: string, price: number, why: string, v
 
 // ---------- what the page draws ----------
 
-type Owner = { id: string; handle: string; name: string; badge: string | null; avatar: string };
-type Company = { id: string; name: string; ticker: string; logo: string; price: number; prevClose: number; shares: number; volume: number; listed: number; suspended: boolean; sector: string; description: string; owner: Owner | null; hist: [number, number][] };
+type Owner = { id: string; handle: string; name: string; badge: string | null; avatar: string; custom: boolean; sq: boolean };
+const DEFAULT_PFP = "/abs/sticky/default_profile_images/default_profile_normal.png";
+// an account's picture, sized for the market's rows and headers; our own uploads stay
+// on this host's path so they load wherever the market is opened from
+const pfpOf = (url: string | null | undefined): string => {
+	const id = url && /^\/media\/(\d{1,19})$/.exec(url)?.[1];
+	return id ? `/profile_images/${id}_x96.jpg` : (avatarSrc(url) ?? DEFAULT_PFP);
+};
+// organisations and governments have square pictures across the site, people round ones (model.ts pictureShape)
+const squareBadge = (t: string | null | undefined) => t === "business" || t === "government";
+type Company = { id: string; name: string; ticker: string; logo: string; img: string; sq: boolean; price: number; prevClose: number; shares: number; volume: number; listed: number; suspended: boolean; sector: string; description: string; owner: Owner | null; hist: [number, number][] };
 type Shared = { companies: Company[]; index: [number, number][]; headlines: any[]; events: any[]; gap: number };
 let cache: { key: number; at: number; value: Promise<Shared> } | undefined;
 
@@ -114,13 +125,19 @@ async function loadShared(): Promise<Shared> {
 	const byCo = new Map<string, [number, number][]>();
 	for (const h of hist) (byCo.get(h.c) ?? byCo.set(h.c, []).get(h.c)!).push([h.t, h.p]);
 	return {
-		companies: rows.map((c: any) => ({
-			id: c.id, name: c.name, ticker: c.ticker, logo: c.has_logo ? `${MARKETS_PATH}/logo/${c.id}?v=${c.logo_v}` : "",
+		companies: rows.map((c: any) => {
+			const logo = c.has_logo ? `${MARKETS_PATH}/logo/${c.id}?v=${c.logo_v}` : "";
+			const owner: Owner | null = c.owner_id ? { id: c.owner_id, handle: c.owner_handle, name: c.owner_name, badge: c.owner_badge ?? null, avatar: pfpOf(c.owner_avatar), custom: !!c.owner_avatar, sq: squareBadge(c.owner_badge) } : null;
+			// the founder's own picture first, then an uploaded logo, then the founder's default one; none at all draws the ticker
+			const img = owner?.custom ? owner.avatar : logo || owner?.avatar || "";
+			return {
+			id: c.id, name: c.name, ticker: c.ticker, logo, img, sq: owner ? owner.sq : !!logo,
 			price: c.price, prevClose: c.prev_close, shares: c.shares, volume: c.volume, listed: c.listed, suspended: c.suspended,
 			sector: c.sector, description: c.description,
-			owner: c.owner_id ? { id: c.owner_id, handle: c.owner_handle, name: c.owner_name, badge: c.owner_badge ?? null, avatar: avatarSrc(c.owner_avatar) ?? "/abs/sticky/default_profile_images/default_profile_normal.png" } : null,
+			owner,
 			hist: byCo.get(c.id) ?? [],
-		})),
+		};
+		}),
 		index: index.map((x: any) => [x.t, x.value]),
 		headlines: headlines.map((h: any) => ({ id: h.id, text: h.text, cat: h.cat, ticker: h.ticker ?? "", brk: h.breaking, t: h.t })),
 		events: events.map((e: any) => ({ id: e.id, name: e.name, detail: e.detail, t: e.t })),
@@ -141,7 +158,7 @@ function shared(): Promise<Shared> {
 async function account(viewer: Viewer) {
 	const on = moneyOn();
 	const [[u], holdings, txns, [owned]] = await Promise.all([
-		sql`select verified_type, status from users where id = ${viewer.id}`,
+		sql`select verified_type, status, name, avatar_url from users where id = ${viewer.id}`,
 		sql`select company_id::text as id, qty, cost from market_holdings where user_id = ${viewer.id}`,
 		sql`select side, ticker, qty, price::float8, coalesce(total_cents::float8 / 100, total::float8) as total, (extract(epoch from created_at) * 1000)::float8 as t from market_txns where user_id = ${viewer.id} order by id desc limit 100`,
 		sql`select count(*)::int as n from market_companies where owner_id = ${viewer.id}`,
@@ -152,6 +169,9 @@ async function account(viewer: Viewer) {
 	const canList = LISTERS.includes(u?.verified_type) && u?.status !== "restricted" && u?.status !== "suspended";
 	return {
 		handle: viewer.screen_name,
+		name: u?.name ?? viewer.screen_name,
+		avatar: pfpOf(u?.avatar_url),
+		sq: squareBadge(u?.verified_type),
 		cash: cents === null ? null : cents / 100,
 		accepted,
 		badge: u?.verified_type ?? null,
@@ -242,15 +262,14 @@ async function register(viewer: Viewer, b: any) {
 	if (description.length < 10) throw new Refusal("Describe the company in a sentence");
 	if (!(price >= 0.1 && price <= 1000)) throw new Refusal("The starting price is between $0.10 and $1,000");
 	if (!(sh >= 1000 && sh <= 10_000_000)) throw new Refusal("Shares outstanding are between 1,000 and 10,000,000");
-	const logo = logoOf(b.logo);
 	const p = Math.round(price * 100) / 100;
 	await sql.begin(async (tx) => {
 		// one account's listings counted under a lock of its own, so two at once can't both fit
 		await tx`select pg_advisory_xact_lock(hashtext(${`market-list:${viewer.id}`}))`;
 		const [n] = await tx`select count(*)::int as n from market_companies where owner_id = ${viewer.id}`;
 		if (n.n >= OWN_MAX) throw new Refusal(`You can list up to ${OWN_MAX} companies`);
-		const [c] = await tx`insert into market_companies (name, ticker, price, prev_close, shares, logo, logo_type, owner_id, sector, description)
-			values (${name}, ${tk}, ${p}, ${p}, ${sh}, ${logo?.bytes ?? null}, ${logo?.type ?? null}, ${viewer.id}, ${sector}, ${description}) on conflict (ticker) do nothing returning id`;
+		const [c] = await tx`insert into market_companies (name, ticker, price, prev_close, shares, owner_id, sector, description)
+			values (${name}, ${tk}, ${p}, ${p}, ${sh}, ${viewer.id}, ${sector}, ${description}) on conflict (ticker) do nothing returning id`;
 		if (!c) throw new Refusal("That ticker is taken");
 		await tx`insert into market_history (company_id, price) values (${c.id}, ${p})`;
 	});
@@ -265,14 +284,23 @@ async function editCompany(viewer: Viewer, b: any) {
 	const sector = SECTORS.includes(b.sector) ? b.sector : null;
 	if ([...name].length < 2) throw new Refusal("Give the company a name");
 	if (!sector) throw new Refusal("Choose a sector");
-	const logo = b.clearLogo ? null : logoOf(b.logo);
 	await sql`update market_companies set name = ${name}, sector = ${sector}, description = ${description} where id = ${c.id}`;
-	if (logo) await sql`update market_companies set logo = ${logo.bytes}, logo_type = ${logo.type}, logo_v = logo_v + 1 where id = ${c.id}`;
-	else if (b.clearLogo) await sql`update market_companies set logo = null, logo_type = null, logo_v = logo_v + 1 where id = ${c.id}`;
 	await log(`EDITED ${c.ticker}`, viewer);
 }
 
 // ---------- staff ----------
+
+// staff can tie any company to an account by @handle, so it wears that account's picture and checkmark;
+// undefined leaves it as it is, an empty one unlinks it
+async function ownerOf(v: unknown): Promise<string | null | undefined> {
+	if (v === undefined || v === null) return undefined;
+	const h = String(v).trim().replace(/^@/, "");
+	if (!h) return null;
+	if (!/^[A-Za-z0-9_]{1,15}$/.test(h)) throw new Refusal("That isn't a username");
+	const [u] = await sql`select id::text from users where lower(screen_name) = lower(${h}) and deactivated_at is null`;
+	if (!u) throw new Refusal(`No account @${h}`);
+	return u.id;
+}
 
 function logoOf(v: unknown): { bytes: Buffer; type: string } | null | undefined {
 	if (v === undefined || v === null || v === "") return undefined;
@@ -301,8 +329,9 @@ const ADMIN: Record<string, (b: any, v: Viewer) => Promise<unknown>> = {
 		const logo = logoOf(b.logo);
 		const p = Math.round(price * 100) / 100;
 		const sector = SECTORS.includes(b.sector) ? b.sector : null, description = cleanText(b.description, 200) || null;
-		const [c] = await sql`insert into market_companies (name, ticker, price, prev_close, shares, logo, logo_type, sector, description)
-			values (${name}, ${tk}, ${p}, ${p}, ${sh}, ${logo?.bytes ?? null}, ${logo?.type ?? null}, ${sector}, ${description}) on conflict (ticker) do nothing returning id`;
+		const owner = (await ownerOf(b.owner)) ?? null;
+		const [c] = await sql`insert into market_companies (name, ticker, price, prev_close, shares, logo, logo_type, sector, description, owner_id)
+			values (${name}, ${tk}, ${p}, ${p}, ${sh}, ${logo?.bytes ?? null}, ${logo?.type ?? null}, ${sector}, ${description}, ${owner}) on conflict (ticker) do nothing returning id`;
 		if (!c) throw new Refusal("Ticker already listed");
 		await sql`insert into market_history (company_id, price) values (${c.id}, ${p})`;
 		await log("LISTED " + tk, v);
@@ -313,7 +342,8 @@ const ADMIN: Record<string, (b: any, v: Viewer) => Promise<unknown>> = {
 		if (!name || !tk || !(sh > 0) || sh > 1e15) throw new Refusal("Name, ticker and shares are required");
 		const [clash] = await sql`select 1 from market_companies where ticker = ${tk} and id <> ${c.id}`;
 		if (clash) throw new Refusal("Ticker in use");
-		const logo = logoOf(b.logo);
+		const logo = logoOf(b.logo), owner = await ownerOf(b.owner);
+		if (owner !== undefined) await sql`update market_companies set owner_id = ${owner} where id = ${c.id}`;
 		if (logo) await sql`update market_companies set name = ${name}, ticker = ${tk}, shares = ${sh}, logo = ${logo.bytes}, logo_type = ${logo.type}, logo_v = logo_v + 1 where id = ${c.id}`;
 		else await sql`update market_companies set name = ${name}, ticker = ${tk}, shares = ${sh} where id = ${c.id}`;
 		if (tk !== c.ticker) await sql`update market_headlines set ticker = ${tk} where ticker = ${c.ticker}`;
@@ -502,7 +532,29 @@ async function png(svg: string): Promise<Buffer> {
 	if ((await p.exited) !== 0 || !out.length) throw new Error(`markets image: ${await new Response(p.stderr).text()}`);
 	return out;
 }
-function ogSvg(s: Shared, c: Company | undefined): string {
+// X's checkmark, the one the site and the market's pages draw
+const BLUE_CHECK = "M20.396 11c-.018-.646-.215-1.275-.57-1.816-.354-.54-.852-.972-1.438-1.246.223-.607.27-1.264.14-1.897-.131-.634-.437-1.218-.882-1.687-.47-.445-1.053-.75-1.687-.882-.633-.13-1.29-.083-1.897.14-.273-.587-.704-1.086-1.245-1.44S11.647 1.62 11 1.604c-.646.017-1.273.213-1.813.568s-.969.854-1.24 1.44c-.608-.223-1.267-.272-1.902-.14-.635.13-1.22.436-1.69.882-.445.47-.749 1.055-.878 1.688-.13.633-.08 1.29.144 1.896-.587.274-1.087.705-1.443 1.245-.356.54-.555 1.17-.574 1.817.02.647.218 1.276.574 1.817.356.54.856.972 1.443 1.245-.224.606-.274 1.263-.144 1.896.13.634.433 1.218.877 1.688.47.443 1.054.747 1.687.878.633.132 1.29.084 1.897-.136.274.586.705 1.084 1.246 1.439.54.354 1.17.551 1.816.569.647-.016 1.276-.213 1.817-.567s.972-.854 1.245-1.44c.604.239 1.266.296 1.903.164.636-.132 1.22-.447 1.68-.907.46-.46.776-1.044.908-1.681s.075-1.299-.165-1.903c.586-.274 1.084-.705 1.439-1.246.354-.54.551-1.17.569-1.816zM9.662 14.85l-3.429-3.428 1.293-1.302 2.072 2.072 4.4-4.794 1.347 1.246z";
+const GOLD_CHECK = '<linearGradient gradientUnits="userSpaceOnUse" id="oga" x1="4.411" x2="18.083" y1="2.495" y2="21.508"><stop offset="0" stop-color="#f4e72a"/><stop offset=".539" stop-color="#cd8105"/><stop offset=".68" stop-color="#cb7b00"/><stop offset="1" stop-color="#f4ec26"/><stop offset="1" stop-color="#f4e72a"/></linearGradient><linearGradient gradientUnits="userSpaceOnUse" id="ogb" x1="5.355" x2="16.361" y1="3.395" y2="19.133"><stop offset="0" stop-color="#f9e87f"/><stop offset=".406" stop-color="#e2b719"/><stop offset=".989" stop-color="#e2b719"/></linearGradient><g clip-rule="evenodd" fill-rule="evenodd"><path d="M13.324 3.848L11 1.6 8.676 3.848l-3.201-.453-.559 3.184L2.06 8.095 3.48 11l-1.42 2.904 2.856 1.516.559 3.184 3.201-.452L11 20.4l2.324-2.248 3.201.452.559-3.184 2.856-1.516L18.52 11l1.42-2.905-2.856-1.516-.559-3.184zm-7.09 7.575l3.428 3.428 5.683-6.206-1.347-1.247-4.4 4.795-2.072-2.072z" fill="url(#oga)"/><path d="M13.101 4.533L11 2.5 8.899 4.533l-2.895-.41-.505 2.88-2.583 1.37L4.2 11l-1.284 2.627 2.583 1.37.505 2.88 2.895-.41L11 19.5l2.101-2.033 2.895.41.505-2.88 2.583-1.37L17.8 11l1.284-2.627-2.583-1.37-.505-2.88zm-6.868 6.89l3.429 3.428 5.683-6.206-1.347-1.247-4.4 4.795-2.072-2.072z" fill="url(#ogb)"/><path d="M6.233 11.423l3.429 3.428 5.65-6.17.038-.033-.005 1.398-5.683 6.206-3.429-3.429-.003-1.405.005.003z" fill="#d18800"/></g>';
+const badgeSvg = (t: string | null | undefined) => (!t ? "" : t === "business" ? GOLD_CHECK : `<path fill="${t === "blue" ? "#1d9bf0" : "#829aab"}" d="${BLUE_CHECK}"/>`);
+// the company's picture for its card, as the market pages show it: the founder's, else its logo
+async function ogPicture(c: Company | undefined): Promise<string | null> {
+	try {
+		if (c?.owner?.custom && c.owner.avatar.startsWith("/profile_images/")) {
+			const path = c.owner.avatar.replace(/_x96\.jpg$/, "_200x200.jpg");
+			const guest = { id: GUEST_ID, screen_name: "", name: "", status: "active", role: null } as unknown as Viewer;
+			const r = await serveAvatar(new Request(PUBLIC_ORIGIN + path), path, guest);
+			if (r.ok) return `data:${r.headers.get("content-type")};base64,${Buffer.from(await r.arrayBuffer()).toString("base64")}`;
+		}
+		if (c?.logo) {
+			const [r] = await sql`select logo, logo_type from market_companies where id = ${c.id} and logo is not null`;
+			if (r) return `data:${r.logo_type};base64,${Buffer.from(r.logo).toString("base64")}`;
+		}
+	} catch {}
+	return null;
+}
+// DejaVu Sans Bold's capitals, near enough to set the checkmark after a ticker
+const capWidth = (t: string, size: number) => [...t].reduce((w, ch) => w + (/[IJ]/.test(ch) ? 0.4 : /[MW]/.test(ch) ? 1.02 : 0.78), 0) * size;
+function ogSvg(s: Shared, c: Company | undefined, pic: string | null = null): string {
 	const FONT = "DejaVu Sans, Helvetica, Arial, sans-serif";
 	const all = s.companies;
 	const mc = all.reduce((t, x) => t + x.price * x.shares, 0), base = all.reduce((t, x) => t + x.prevClose * x.shares, 0);
@@ -517,16 +569,27 @@ function ogSvg(s: Shared, c: Company | undefined): string {
 		chart = `<g transform="translate(56 300)"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${col}" stop-opacity=".4"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs><polygon points="0,${H} ${line} ${W},${H}" fill="url(#g)"/><polyline fill="none" stroke="${col}" stroke-width="4" stroke-linejoin="round" points="${line}"/></g>`;
 	}
 	const head = c ? `${esc(c.ticker)}` : "Total market cap";
+	// a company's card wears its picture (round for people, rounded-square for organisations) and its founder's checkmark
+	const tx = c ? 160 : 56;
+	let face = "";
+	if (c) {
+		const shape = c.sq ? `<rect x="56" y="94" width="84" height="84" rx="18"/>` : `<circle cx="98" cy="136" r="42"/>`;
+		face = pic
+			? `<defs><clipPath id="pf">${shape}</clipPath></defs><rect x="56" y="94" width="84" height="84" fill="#202327" clip-path="url(#pf)"/><image x="56" y="94" width="84" height="84" preserveAspectRatio="xMidYMid slice" clip-path="url(#pf)" href="${pic}"/>`
+			: `<g fill="#202327">${shape}</g><text x="98" y="145" font-size="22" font-weight="800" fill="#8b98a5" text-anchor="middle">${esc(c.ticker.slice(0, 4))}</text>`;
+		const b = badgeSvg(c.owner?.badge);
+		if (b) face += `<g transform="translate(${(tx + capWidth(c.ticker, 34) + 8).toFixed(0)} 101) scale(1.55)">${b}</g>`;
+	}
 	const sub = c ? esc(c.name) + (c.sector ? ` · ${esc(c.sector)}` : "") + (c.owner ? ` · @${esc(c.owner.handle)}` : "") + (c.suspended ? " · SUSPENDED" : "") : all.length ? `${all.length} listed compan${all.length === 1 ? "y" : "ies"}` : "No companies listed yet";
 	const value = c ? fmt(c.price) : big(mc);
-	const pill = all.length ? `<rect x="56" y="232" width="170" height="44" rx="22" fill="${up ? "#1d3a2a" : "#3a1d1d"}"/><text x="141" y="263" font-size="24" font-weight="700" text-anchor="middle" fill="${up ? "#4ade80" : "#f87171"}">${up ? "▲" : "▼"} ${Math.abs(change).toFixed(2)}%</text>` : "";
+	const pill = all.length ? `<rect x="56" y="${c ? 244 : 232}" width="170" height="44" rx="22" fill="${up ? "#1d3a2a" : "#3a1d1d"}"/><text x="141" y="${c ? 275 : 263}" font-size="24" font-weight="700" text-anchor="middle" fill="${up ? "#4ade80" : "#f87171"}">${up ? "▲" : "▼"} ${Math.abs(change).toFixed(2)}%</text>` : "";
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="${FONT}">
 <rect width="1200" height="630" fill="#000"/>
 <text x="56" y="70" font-size="26" font-weight="800" letter-spacing="4" fill="#e7e9ea">TRADEX</text>
 <text x="1144" y="70" font-size="22" fill="#71767b" text-anchor="end">${esc(settings().instance_name)} Markets · Equicoins</text>
-<text x="56" y="132" font-size="34" font-weight="700" fill="#e7e9ea">${head}</text>
-<text x="56" y="168" font-size="24" fill="#71767b">${sub}</text>
-<text x="56" y="222" font-size="52" font-weight="800" fill="#ffffff">${value}<tspan font-size="22" font-weight="600" fill="#71767b" dx="14">Equicoins</tspan></text>
+${face}<text x="${tx}" y="${c ? 128 : 132}" font-size="34" font-weight="700" fill="#e7e9ea">${head}</text>
+<text x="${tx}" y="${c ? 166 : 168}" font-size="24" fill="#71767b">${sub}</text>
+<text x="56" y="${c ? 232 : 222}" font-size="52" font-weight="800" fill="#ffffff">${value}<tspan font-size="22" font-weight="600" fill="#71767b" dx="14">Equicoins</tspan></text>
 ${pill}${chart}
 <text x="1144" y="610" font-size="20" fill="#71767b" text-anchor="end">${esc(OWN_HOST)}${MARKETS_PATH}${c ? `?c=${esc(c.ticker)}` : ""}</text>
 </svg>`;
@@ -538,7 +601,7 @@ async function ogImage(ticker: string | null): Promise<Buffer> {
 	const key = `${c?.ticker ?? ""}:${Math.floor(Date.now() / 60000)}`;
 	let p = pictures.get(key);
 	if (!p) {
-		p = png(ogSvg(s, c));
+		p = ogPicture(c).then((pic) => png(ogSvg(s, c, pic)));
 		pictures.set(key, p);
 		p.catch(() => pictures.delete(key));
 		if (pictures.size > 30) pictures.delete(pictures.keys().next().value!);
