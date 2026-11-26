@@ -19,6 +19,7 @@ import { hateIn } from "./hate";
 import { avatarSrc } from "./model";
 import { serveAvatar } from "./media";
 import { GUEST_ID } from "./blocks";
+import { art, artType } from "./verified-art";
 import { acceptDisclaimer, balanceOf, disclaimerAccepted, disclaimerText, economy } from "./money";
 import { hit, limitedResponse } from "./ratelimit";
 import { feature, hasBlockedPhrase, settings } from "./settings";
@@ -37,11 +38,17 @@ const INDEX = 300; // market-cap points kept
 const LOGS = 300;
 const CATS = ["Markets", "Corporate", "Economy", "Policy", "Major event"];
 const MAX_LOGO = 1_000_000;
+// the walk (see tick): per two-second step, as fractions of the price
+const STEP = 0.0022, PULL = 0.025, FAIR_DRIFT = 0.0007, JUMP_ODDS = 0.012, JUMP = 0.012;
+const MIN_PRICE = 0.0001;
+const SEED = 120; // steps of history a new listing starts with
 
 const esc = (t: string) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const json = (v: unknown, status = 200) => Response.json(v, { status, headers: { "cache-control": "no-store" } });
 const fail = (message: string, status = 400) => json({ error: message }, status);
 const fmt = (n: number) => "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// a share price: four decimals under a dollar, where its moves are
+const fmtP = (n: number) => (n < 1 ? "$" + Number(n).toFixed(4) : fmt(n));
 const big = (n: number) => (n >= 1e12 ? "$" + (n / 1e12).toFixed(2) + "T" : n >= 1e9 ? "$" + (n / 1e9).toFixed(2) + "B" : n >= 1e6 ? "$" + (n / 1e6).toFixed(2) + "M" : fmt(n));
 const pct = (a: number, b: number) => (b ? ((a - b) / b) * 100 : 0);
 const sg = (x: number) => (x >= 0 ? "+" : "") + x.toFixed(2) + "%";
@@ -58,9 +65,17 @@ async function tick() {
 	if (ticking) return;
 	ticking = true;
 	try {
-		// the original's walk: each listed price moves up to 0.4% either way
+		// each listed price takes a small random step (log-normal, so a $0.10
+		// stock moves as visibly as a $100 one), pulled gently back towards a fair
+		// value that wanders slowly itself, now and then a bigger jump; prices keep
+		// six decimals, so no move is rounded away. Volume trickles in, more for
+		// the bigger companies.
 		const moved = await sql`with u as (
-			update market_companies set price = greatest(0.01, round((price * (1 + (random() * 2 - 1) * 0.004))::numeric, 2)), volume = volume + floor(random() * 40)::bigint
+			update market_companies set
+				fair = coalesce(fair, price::float8) * exp(random_normal(0, ${FAIR_DRIFT})),
+				price = greatest(${MIN_PRICE}, round((price::float8 * exp(random_normal(0, ${STEP}) + ${PULL} * ln(coalesce(fair, price::float8) / price::float8)
+					+ case when random() < ${JUMP_ODDS} then random_normal(0, ${JUMP}) else 0 end))::numeric, 6)),
+				volume = volume + floor(power(random(), 2) * greatest(12, shares / 20000.0))::bigint
 			where not suspended returning id, price)
 			insert into market_history (company_id, price) select id, price from u returning company_id`;
 		if (!moved.length) return;
@@ -73,11 +88,69 @@ async function tick() {
 		ticking = false;
 	}
 }
+// a market with history: the walk a price took to get where it is, run
+// backwards from it, two seconds a step, so a new listing (or one whose chart
+// is flat) looks like it has been trading for a while. Prices only; nobody's
+// shares or Equicoins are touched.
+const normal = () => Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(2 * Math.PI * Math.random());
+function pastWalk(price: number, n: number): number[] {
+	const out = [price];
+	let p = price;
+	for (let i = 1; i < n; i++) {
+		p = Math.max(MIN_PRICE, p * Math.exp(-(normal() * STEP * 1.6) + 0.04 * Math.log(price / p)));
+		out.unshift(Number(p.toFixed(6)));
+	}
+	return out;
+}
+async function seedHistory(db: typeof sql, id: string, price: number, n = SEED) {
+	const walk = pastWalk(price, n), now = Date.now();
+	const ts = walk.map((_, i) => new Date(now - (n - 1 - i) * 2000 - 1000).toISOString());
+	await db`insert into market_history (company_id, t, price) select ${id}, t::timestamptz, p::numeric from unnest(${ts}::text[], ${walk.map(String)}::text[]) as x(t, p)`;
+	return walk;
+}
+// companies whose chart is flat or nearly empty get a past; then a flat market-cap line is redrawn from them
+async function revive() {
+	const flat = await sql`select c.id::text, c.price::float8 as price from market_companies c
+		where (select count(distinct h.price) from market_history h where h.company_id = c.id) <= 3
+			or (select count(*) from market_history h where h.company_id = c.id) < 20`;
+	for (const c of flat) {
+		await sql.begin(async (tx) => {
+			await tx`delete from market_history where company_id = ${c.id}`;
+			await seedHistory(tx, c.id, c.price);
+			await tx`update market_companies set volume = greatest(volume, floor(shares * (0.004 + random() * 0.008))::bigint) where id = ${c.id}`;
+		});
+	}
+	const [ix] = await sql`select count(*)::int as n, count(distinct round(value::numeric, 4))::int as d from (select value from market_index order by id desc limit ${INDEX}) x`;
+	if (flat.length || ix.n < 20 || ix.d <= 1) await redrawIndex();
+	if (flat.length) changed++;
+}
+async function redrawIndex() {
+	await sql.begin(async (tx) => {
+		await tx`delete from market_index`;
+		await tx`insert into market_index (t, value)
+			select g.t, coalesce(sum(coalesce((select h.price from market_history h where h.company_id = c.id and h.t <= g.t order by h.t desc limit 1), c.price) * c.shares), 0)::float8
+			from (select distinct date_trunc('second', t) as t from market_history order by 1 desc limit ${INDEX}) g cross join market_companies c group by g.t order by g.t`;
+	});
+}
+// a new listing opens with a past: its chart, a day's worth of volume, a headline, and the market-cap line follows
+async function listedWithHistory(db: typeof sql, id: string, price: number, name: string, ticker: string) {
+	const walk = await seedHistory(db, id, price);
+	await db`update market_companies set prev_close = ${walk[0]}, fair = ${price}, volume = floor(shares * (0.004 + random() * 0.008))::bigint where id = ${id}`;
+	await db`insert into market_headlines (text, cat, ticker) values (${`${name} (${ticker}) lists on TradeX at ${fmt(price)}`}, 'Corporate', ${ticker})`;
+	setTimeout(() => redrawIndex().then(() => changed++).catch(() => {}), 500);
+}
+// flat charts get their past first, then the clock starts
+if (process.env.MARKETS_TICK !== "0")
+	setTimeout(() => {
+		revive()
+			.catch((e) => console.error("markets revive", e))
+			.finally(() => setInterval(tick, 2000).unref?.());
+	}, 3000).unref?.();
+
 async function prune() {
 	await sql`delete from market_history h using (select id from (select id, row_number() over (partition by company_id order by id desc) rn from market_history) x where rn > ${HIST}) d where h.id = d.id`;
 	await sql`delete from market_index where id <= (select id from market_index order by id desc offset ${INDEX} limit 1)`;
 }
-if (process.env.MARKETS_TICK !== "0") setInterval(tick, 2000).unref?.();
 
 async function log(action: string, viewer?: Viewer) {
 	await sql`insert into market_logs (action) values (${viewer ? `${action} · @${viewer.screen_name}` : action})`;
@@ -89,10 +162,10 @@ async function event(name: string, detail: string, viewer: Viewer) {
 }
 // the original's reprice(): a new price, a point on its chart, a log line
 async function reprice(id: string, ticker: string, price: number, why: string, viewer: Viewer) {
-	const p = Math.max(0.01, Math.round(price * 100) / 100);
+	const p = Math.max(MIN_PRICE, Number(price.toFixed(price < 1 ? 6 : 2)));
 	await sql`update market_companies set price = ${p} where id = ${id}`;
 	await sql`insert into market_history (company_id, price) values (${id}, ${p})`;
-	await log(`${ticker} ${fmt(p)} (${why})`, viewer);
+	await log(`${ticker} ${fmtP(p)} (${why})`, viewer);
 }
 
 // ---------- what the page draws ----------
@@ -190,6 +263,8 @@ async function state(viewer: Viewer | undefined) {
 		...s, me, admin: isAdmin(viewer), instance: settings().instance_name,
 		money: { on, name: coinName(), disclaimer: on && me && !me.accepted ? disclaimerText() : null },
 		sectors: SECTORS,
+		// the instance's own checkmark art (verified-art.ts), the pictures the rest of the site shows
+		checks: { blue: art("blue"), gold: art("gold"), grey: art("grey") },
 	};
 }
 
@@ -271,7 +346,7 @@ async function register(viewer: Viewer, b: any) {
 		const [c] = await tx`insert into market_companies (name, ticker, price, prev_close, shares, owner_id, sector, description)
 			values (${name}, ${tk}, ${p}, ${p}, ${sh}, ${viewer.id}, ${sector}, ${description}) on conflict (ticker) do nothing returning id`;
 		if (!c) throw new Refusal("That ticker is taken");
-		await tx`insert into market_history (company_id, price) values (${c.id}, ${p})`;
+		await listedWithHistory(tx, c.id, p, name, tk);
 	});
 	await log(`REGISTERED ${tk}`, viewer);
 }
@@ -333,7 +408,7 @@ const ADMIN: Record<string, (b: any, v: Viewer) => Promise<unknown>> = {
 		const [c] = await sql`insert into market_companies (name, ticker, price, prev_close, shares, logo, logo_type, sector, description, owner_id)
 			values (${name}, ${tk}, ${p}, ${p}, ${sh}, ${logo?.bytes ?? null}, ${logo?.type ?? null}, ${sector}, ${description}, ${owner}) on conflict (ticker) do nothing returning id`;
 		if (!c) throw new Refusal("Ticker already listed");
-		await sql`insert into market_history (company_id, price) values (${c.id}, ${p})`;
+		await listedWithHistory(sql, c.id, p, name, tk);
 		await log("LISTED " + tk, v);
 	},
 	async edit(b, v) {
@@ -481,7 +556,7 @@ function describeMarket(s: Shared) {
 	return `Total market cap ${big(mc)} Equicoins (${sg(pct(mc, base))}) · ${all.length} listed compan${all.length === 1 ? "y" : "ies"}, ${L.length} active.`;
 }
 function describeCompany(c: Company) {
-	return `${c.name} (${c.ticker}) ${fmt(c.price)} Equicoins ${sg(pct(c.price, c.prevClose))} · market cap ${big(c.price * c.shares)} · volume ${c.volume.toLocaleString("en-US")}${c.sector ? ` · ${c.sector}` : ""}${c.owner ? ` · founded by @${c.owner.handle}` : ""}${c.suspended ? " · SUSPENDED" : ""}`;
+	return `${c.name} (${c.ticker}) ${fmtP(c.price)} Equicoins ${sg(pct(c.price, c.prevClose))} · market cap ${big(c.price * c.shares)} · volume ${c.volume.toLocaleString("en-US")}${c.sector ? ` · ${c.sector}` : ""}${c.owner ? ` · founded by @${c.owner.handle}` : ""}${c.suspended ? " · SUSPENDED" : ""}`;
 }
 
 async function page(req: Request, viewer: Viewer | undefined): Promise<Response> {
@@ -552,9 +627,25 @@ async function ogPicture(c: Company | undefined): Promise<string | null> {
 	} catch {}
 	return null;
 }
+// the instance's checkmark art as PNG, which the card renderer can draw (X's drawing without it)
+const artPng = new Map<string, Promise<string | null>>();
+function checkArt(verifiedType: string | null | undefined): Promise<string | null> {
+	const t = artType(verifiedType);
+	if (!t || !art(t)) return Promise.resolve(null);
+	let p = artPng.get(t);
+	if (!p) {
+		p = (async () => {
+			const proc = Bun.spawn(["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", join(process.env.PUBLIC_DIR ?? "public", `verified-${t}.webp`), "-frames:v", "1", "-f", "image2", "-c:v", "png", "-"], { stdout: "pipe", stderr: "pipe" });
+			const out = Buffer.from(await new Response(proc.stdout).arrayBuffer());
+			return (await proc.exited) === 0 && out.length ? `data:image/png;base64,${out.toString("base64")}` : null;
+		})();
+		artPng.set(t, p);
+	}
+	return p;
+}
 // DejaVu Sans Bold's capitals, near enough to set the checkmark after a ticker
 const capWidth = (t: string, size: number) => [...t].reduce((w, ch) => w + (/[IJ]/.test(ch) ? 0.4 : /[MW]/.test(ch) ? 1.02 : 0.78), 0) * size;
-function ogSvg(s: Shared, c: Company | undefined, pic: string | null = null): string {
+function ogSvg(s: Shared, c: Company | undefined, pic: string | null = null, check: string | null = null): string {
 	const FONT = "DejaVu Sans, Helvetica, Arial, sans-serif";
 	const all = s.companies;
 	const mc = all.reduce((t, x) => t + x.price * x.shares, 0), base = all.reduce((t, x) => t + x.prevClose * x.shares, 0);
@@ -577,11 +668,12 @@ function ogSvg(s: Shared, c: Company | undefined, pic: string | null = null): st
 		face = pic
 			? `<defs><clipPath id="pf">${shape}</clipPath></defs><rect x="56" y="94" width="84" height="84" fill="#202327" clip-path="url(#pf)"/><image x="56" y="94" width="84" height="84" preserveAspectRatio="xMidYMid slice" clip-path="url(#pf)" href="${pic}"/>`
 			: `<g fill="#202327">${shape}</g><text x="98" y="145" font-size="22" font-weight="800" fill="#8b98a5" text-anchor="middle">${esc(c.ticker.slice(0, 4))}</text>`;
-		const b = badgeSvg(c.owner?.badge);
-		if (b) face += `<g transform="translate(${(tx + capWidth(c.ticker, 34) + 8).toFixed(0)} 101) scale(1.55)">${b}</g>`;
+		const b = badgeSvg(c.owner?.badge), bx = (tx + capWidth(c.ticker, 34) + 8).toFixed(0);
+		if (check) face += `<image x="${bx}" y="99" width="36" height="36" href="${check}"/>`;
+		else if (b) face += `<g transform="translate(${(tx + capWidth(c.ticker, 34) + 8).toFixed(0)} 101) scale(1.55)">${b}</g>`;
 	}
 	const sub = c ? esc(c.name) + (c.sector ? ` · ${esc(c.sector)}` : "") + (c.owner ? ` · @${esc(c.owner.handle)}` : "") + (c.suspended ? " · SUSPENDED" : "") : all.length ? `${all.length} listed compan${all.length === 1 ? "y" : "ies"}` : "No companies listed yet";
-	const value = c ? fmt(c.price) : big(mc);
+	const value = c ? fmtP(c.price) : big(mc);
 	const pill = all.length ? `<rect x="56" y="${c ? 244 : 232}" width="170" height="44" rx="22" fill="${up ? "#1d3a2a" : "#3a1d1d"}"/><text x="141" y="${c ? 275 : 263}" font-size="24" font-weight="700" text-anchor="middle" fill="${up ? "#4ade80" : "#f87171"}">${up ? "▲" : "▼"} ${Math.abs(change).toFixed(2)}%</text>` : "";
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="${FONT}">
 <rect width="1200" height="630" fill="#000"/>
@@ -601,7 +693,7 @@ async function ogImage(ticker: string | null): Promise<Buffer> {
 	const key = `${c?.ticker ?? ""}:${Math.floor(Date.now() / 60000)}`;
 	let p = pictures.get(key);
 	if (!p) {
-		p = ogPicture(c).then((pic) => png(ogSvg(s, c, pic)));
+		p = Promise.all([ogPicture(c), checkArt(c?.owner?.badge)]).then(([pic, check]) => png(ogSvg(s, c, pic, check)));
 		pictures.set(key, p);
 		p.catch(() => pictures.delete(key));
 		if (pictures.size > 30) pictures.delete(pictures.keys().next().value!);

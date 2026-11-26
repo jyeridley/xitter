@@ -2041,3 +2041,21 @@ alter table market_companies add column if not exists sector text;
 alter table market_companies add column if not exists description text;
 create index if not exists market_companies_owner on market_companies (owner_id) where owner_id is not null;
 alter table market_txns add column if not exists total_cents bigint;
+-- TradeX prices keep sub-cent precision: a 2-decimal price under about $1.25
+-- rounded every tick's move away and sat flat. Widened once (a no-op after).
+do $$ begin
+	if (select numeric_scale from information_schema.columns where table_name = 'market_companies' and column_name = 'price') < 6 then
+		alter table market_companies alter column price type numeric(20,6), alter column prev_close type numeric(20,6);
+		alter table market_history alter column price type numeric(20,6);
+		alter table market_txns alter column price type numeric(20,6);
+	end if;
+end $$;
+-- each company drifts around a slowly wandering fair value; a price set by
+-- hand (staff, an event, a crash) becomes its new fair value
+alter table market_companies add column if not exists fair double precision;
+create or replace function market_fair() returns trigger language plpgsql as $$
+begin
+	if new.price is distinct from old.price and new.fair is not distinct from old.fair then new.fair := new.price; end if;
+	return new;
+end $$;
+create or replace trigger market_fair before update on market_companies for each row execute function market_fair();

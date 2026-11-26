@@ -60,6 +60,10 @@ export function hideCss(): string {
 	const off = (Object.keys(BY_FEATURE) as Feature[]).filter((f) => !feature(f)).flatMap((f) => BY_FEATURE[f]);
 	return `${[...ALWAYS, ...off].join(",")}{display:none!important}
 html[data-xitter-full] [data-testid="primaryColumn"] > :not(#xitter-pane){display:none!important}
+html[data-xitter-wide] [data-testid="sidebarColumn"]{display:none!important}
+html[data-xitter-wide] [data-testid="primaryColumn"]{max-width:none!important;flex-grow:1!important;width:100%!important}
+html[data-xitter-wide] main[role="main"]{flex:1 1 1240px!important;min-width:0!important}
+html[data-xitter-wide] main[role="main"] > div{width:min(100%,1240px)!important;max-width:none!important}
 [data-testid="sidebarColumn"] section div:has(> button[aria-label$=" Topic"]){border-radius:11px}
 #xitter-announcement{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;background:var(--xt-accent-fill,var(--xt-accent,#1d9bf0));color:#fff;font:15px TwitterChirp,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 #xitter-announcement .xa-body{flex:1;min-width:0;display:grid;gap:10px}
@@ -323,6 +327,8 @@ export const TIDY_SCRIPT = `(function(){
 	}
 	function pane(){
 		var p=location.pathname,f=document.getElementById("xitter-pane"),base=framed(p);
+		// TradeX takes the side bar's room too: its trading screens want the width
+		document.documentElement.toggleAttribute("data-xitter-wide",p==="/i/markets"||p==="/i/markets/");
 		document.documentElement.toggleAttribute("data-xitter-full",!!(base&&fullOf(p)&&f&&f.hasAttribute("data-col")));
 		if(!base){if(f){stopPaneFit();f.remove()}since=0;return}
 		var want=base+location.search;

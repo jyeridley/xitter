@@ -22,7 +22,11 @@ const GOLD = ":has(linearGradient)";
 const GREY = ':has(path[fill="#829aab" i])';
 const pick = (svg: string) => ({ gold: `${svg}${GOLD}`, grey: `${svg}${GREY}`, blue: `${svg}:not(${GOLD}):not(${GREY})` });
 
-function art(type: string): string | null {
+// the art's address for an account's verified_type, as the client shows it
+// (markets.ts draws the same picture beside a company's name); null without art
+export const artType = (verifiedType: string | null | undefined): "blue" | "gold" | "grey" | null =>
+	!verifiedType ? null : verifiedType === "business" ? "gold" : verifiedType.startsWith("government") ? "grey" : "blue";
+export function art(type: string): string | null {
 	try {
 		const body = readFileSync(`${PUBLIC_DIR}/verified-${type}.webp`);
 		return `/public/verified-${type}.webp?v=${Bun.hash(body).toString(36)}`;
