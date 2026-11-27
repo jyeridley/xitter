@@ -2034,8 +2034,8 @@ create table if not exists market_state (
 	key text primary key,
 	value double precision not null
 );
--- TradeX on Money: companies listed by accounts with a blue or gold
--- checkmark carry their founder, a sector and a line about them
+-- TradeX on Money: companies listed by any account (a checkmarked founder's
+-- show verified) carry their founder, a sector and a line about them
 alter table market_companies add column if not exists owner_id bigint references users(id) on delete set null;
 alter table market_companies add column if not exists sector text;
 alter table market_companies add column if not exists description text;

@@ -104,6 +104,9 @@ img.logo-img{border:1px solid var(--line);box-sizing:border-box}
 .empty h2{font-size:26px;font-weight:800;margin:0 0 8px;letter-spacing:-.02em}
 .empty p{color:var(--mut);margin:0 auto 20px;max-width:400px}
 .note{color:var(--mut);font-size:14px}
+.unv{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:12px;background:color-mix(in srgb,#f59e0b 10%,transparent);border:1px solid color-mix(in srgb,#f59e0b 32%,transparent);color:var(--txt);font-size:13px;line-height:1.4}
+.unv svg{flex:0 0 auto;color:#f59e0b;margin-top:1px}.unv b{display:block;font-size:14px;margin-bottom:1px}.unv span{color:var(--mut)}
+.cknote{display:flex;gap:8px;align-items:center;justify-content:center;color:var(--mut);font-size:13px;padding:16px 12px 4px;text-align:left}.cknote svg{flex:0 0 auto;opacity:.8}
 .banner{display:flex;gap:12px;align-items:center;padding:12px 16px;border-radius:12px;background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--txt);font-size:14px;margin-bottom:12px}
 .banner b{font-weight:700}
 .ticket .side{display:grid;grid-template-columns:1fr 1fr;background:var(--card2);border-radius:999px;padding:3px;margin-bottom:14px}
@@ -256,12 +259,17 @@ function unhov(el){el.querySelector('.xh').style.display='none';el.querySelector
 document.addEventListener('mouseleave',function(){document.querySelectorAll('[data-hov]').forEach(unhov)});
 function spark(c){var h=c.hist.slice(-30);if(h.length<2)return '<span class=spark></span>';var v=h.map(function(x){return x[1]}),col=v[v.length-1]>=v[0]?'var(--up)':'var(--dn)';return '<svg class=spark viewBox="0 0 72 28" preserveAspectRatio="none"><polyline fill="none" stroke="'+col+'" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" points="'+path(v,72,28,3)+'"/></svg>'}
 function item(c,right){return '<div class=item data-go="co" data-id="'+c.id+'">'+logo(c)+'<div class=who>'+nm(c,'t1')+'<div class=t2>'+esc(c.ticker)+(c.sector?' · '+esc(c.sector):'')+(c.suspended?' · Suspended':'')+'</div></div>'+spark(c)+'<div class=px>'+(right||('<div class="t1 num">'+fp(c.price)+'</div>'+pill(chg(c))))+'</div></div>'}
+var SHIELD='<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="M12 8v4.5M12 16h.01"/></svg>';
+function verified(c){return !!(c&&c.owner&&c.owner.badge)}
+function unvText(){return 'Companies without a checkmark aren\'t officially verified by '+esc(db.instance||'us')+'.'}
+function unvBanner(){return '<div class=unv role=note>'+SHIELD+'<div><b>Unverified company</b><span>'+unvText()+' Do your own research before trading.</span></div></div>'}
+function checkNote(){return '<div class=cknote>'+SHIELD+'<span>A checkmark next to a company means its founder is verified. '+unvText()+'</span></div>'}
 function listCta(){
  if(!db.me)return '';
- if(db.me.canList)return '<div class="tile between" style="margin-bottom:12px"><div><div style="font-weight:800">List your company</div><div class=lbl>'+(db.admin?'Staff can list any number of companies.':'Accounts with a blue or gold checkmark can list up to '+db.me.ownMax+' companies ('+db.me.owned+' listed).')+'</div></div><button class=primary data-go="new" style="flex:0 0 auto">List a company</button></div>';
+ if(db.me.canList)return '<div class="tile between" style="margin-bottom:12px"><div><div style="font-weight:800">List your company</div><div class=lbl>'+(db.admin?'Staff can list any number of companies.':'Any account can list up to '+db.me.ownMax+' companies ('+db.me.owned+' listed).'+(db.me.badge?'':' Without a checkmark, yours show as unverified.'))+'</div></div><button class=primary data-go="new" style="flex:0 0 auto">List a company</button></div>';
  return '';
 }
-function emptyMarket(){return '<div class="card empty"><h2>No companies yet</h2><p>Nothing is listed on the market yet. Staff, and accounts with a blue or gold checkmark, can list a company'+(db.me&&db.me.canList?' right now.':'.')+'</p>'+(db.me&&db.me.canList?'<button class=primary data-go="new">List a company</button>':'')+'</div>'}
+function emptyMarket(){return '<div class="card empty"><h2>No companies yet</h2><p>Nothing is listed on the market yet. Anyone with an account can list a company'+(db.me&&db.me.canList?' right now.':'.')+'</p>'+(db.me&&db.me.canList?'<button class=primary data-go="new">List a company</button>':'')+'</div>'}
 function moneyBanner(){
  if(!db.money.on)return '<div class=banner><span class=coin style="font-size:20px;flex:0 0 auto">'+coin+'</span><div><b>Trading opens when Money is turned on.</b> '+(db.admin?'Turn on Money under Admin › Features, and every account trades with its own balance.':'Prices are live, but buying and selling waits for '+esc(db.money.name)+'.')+'</div></div>';
  return '';
@@ -283,13 +291,13 @@ function dash(){
  +'<div class=tile><div class=lbl>Market performance</div><div class="mid '+(perf>=0?'up':'dn')+'" style="margin-top:4px">'+sg(perf)+'</div><div class=lbl style="margin-top:4px">vs. previous close</div></div>'
  +'<div class=tile><div class=lbl>Listed companies</div><div class=mid style="margin-top:4px">'+all.length+'</div><div class=lbl style="margin-top:4px">'+L.length+' active · '+(all.length-L.length)+' suspended</div></div>'
  +mine+'</div></div>'+listCta()
- +'<div class=movers>'+panel('Top gainers',G)+panel('Top decliners',D)+panel('Most active',V)+panel('Recently listed',R)+'</div></main>'}
+ +'<div class=movers>'+panel('Top gainers',G)+panel('Top decliners',D)+panel('Most active',V)+panel('Recently listed',R)+'</div>'+checkNote()+'</main>'}
 function list(){
  if(!db.companies.length)return '<main>'+moneyBanner()+emptyMarket()+'</main>';
  var f=S.find.trim().toLowerCase();
  var rows=db.companies.filter(function(c){return !f||c.ticker.toLowerCase().indexOf(f)>=0||c.name.toLowerCase().indexOf(f)>=0||(c.sector||'').toLowerCase().indexOf(f)>=0});
  return '<main>'+listCta()+'<div class=search><svg viewBox="0 0 24 24"><path d="M10.25 3.75c-3.59 0-6.5 2.91-6.5 6.5s2.91 6.5 6.5 6.5c1.795 0 3.419-.726 4.596-1.904 1.178-1.177 1.904-2.801 1.904-4.596 0-3.59-2.91-6.5-6.5-6.5zm-8.5 6.5c0-4.694 3.806-8.5 8.5-8.5s8.5 3.806 8.5 8.5c0 1.986-.682 3.815-1.824 5.262l4.781 4.781-1.414 1.414-4.781-4.781c-1.447 1.142-3.276 1.824-5.262 1.824-4.694 0-8.5-3.806-8.5-8.5z"/></svg><input id=find type=search placeholder="Search companies" value="'+esc(S.find)+'" autocomplete=off></div>'
- +'<div class=tbl id=rows>'+rowsOf(rows)+'</div></main>'}
+ +'<div class=tbl id=rows>'+rowsOf(rows)+'</div>'+checkNote()+'</main>'}
 function rowsOf(rows){if(!rows.length)return '<div class=lbl style="padding:16px">No companies match.</div>';
  return '<div class="tr th"><div>Company</div><div>Price</div><div>Change</div><div>Chart</div><div>Market cap</div><div>Volume</div></div>'
  +rows.map(function(c){return '<div class="tr go" data-go="co" data-id="'+c.id+'"><div class=co>'+logo(c)+'<div class=who>'+nm(c,'t1')+'<div class=t2>'+esc(c.ticker)+(c.sector?' · '+esc(c.sector):'')+(c.suspended?' · Suspended':'')+'</div></div></div>'
@@ -327,6 +335,7 @@ function coPage(){var c=C(S.cid);if(!c)return '<main><div class="card empty"><h2
  var newsP=news.length?'<div class=panel style="margin:0"><div class=hd><h3>News</h3></div><div class=list>'+news.slice(0,6).map(function(h){return '<div class=item style="cursor:default;display:block">'+(h.brk?'<span class="tag brk">BREAKING</span> ':'')+'<span class=lbl>'+esc(h.cat)+' · '+new Date(h.t).toLocaleDateString()+'</span><div style="margin-top:4px">'+esc(h.text)+'</div></div>'}).join('')+'</div></div>':'';
  return '<main>'+moneyBanner()+'<div class=wide2><div class=lcol style="display:flex;flex-direction:column;gap:12px;min-width:0"><div class=card style="padding:0;margin:0">'
  +'<div class=between style="padding:18px 18px 0;align-items:flex-start"><div style="display:flex;gap:14px;align-items:center;min-width:0">'+logo(c,'lg')+'<div style="min-width:0">'+nm(c,'coname')+'<div class=lbl>'+esc(c.ticker)+(c.sector?' · '+esc(c.sector):'')+(c.suspended?' · <span class="tag brk">SUSPENDED</span>':'')+'</div></div></div>'+'<div class=hbtns><button class="small xp" data-export="'+esc(c.ticker)+'" title="Download a picture of this stock" aria-label="Export image">'+EXPORT_ICON+'<span class=xpl>Export image</span></button>'+(canEdit?'<button class=small data-go="edit" data-id="'+c.id+'">Edit</button>':'')+'</div></div>'
+ +(verified(c)?'':'<div style="padding:14px 18px 0">'+unvBanner()+'</div>')
  +'<div class=between style="padding:14px 18px 0;align-items:flex-end"><div><div class="big xl" id=px>'+fp(c.price)+'</div><div class=row style="gap:8px;margin-top:4px"><span id=chg style="flex:0 0 auto">'+pill(chg(c))+'</span><span class=lbl style="flex:0 0 auto">since listing</span></div></div>'
  +'<div style="display:flex;align-items:center;gap:12px"><span class=lbl><span class=pulse></span>Live</span><div class=seg>'+[[30,'1M'],[90,'3M'],[200,'All']].map(function(a){return '<button class="'+(S.range===a[0]?'on':'')+'" data-range="'+a[0]+'">'+a[1]+'</button>'}).join('')+'</div></div></div>'
  +'<div id=live style="margin-top:10px">'+coChart(c)+'</div>'
@@ -351,7 +360,7 @@ function acct(){if(!db.me)return '<main><div class="card empty"><h2>Your portfol
 function companyForm(c){
  var isNew=!c;
  if(!db.me)return '<main><div class="card empty"><h2>List a company</h2><p>Sign in first.</p></div></main>';
- if(isNew&&!db.me.canList)return '<main><div class="card empty"><h2>List a company</h2><p>Accounts with a blue or gold checkmark can list a company on the market. Staff can list one for anyone.</p><button data-go="dash">Back to Markets</button></div></main>';
+ if(isNew&&!db.me.canList)return '<main><div class="card empty"><h2>List a company</h2><p>Your account can\'t list a company right now.</p><button data-go="dash">Back to Markets</button></div></main>';
  if(isNew&&db.me.ownMax!=null&&db.me.owned>=db.me.ownMax)return '<main><div class="card empty"><h2>You\'ve listed '+db.me.owned+' companies</h2><p>Each account can list up to '+db.me.ownMax+'.</p><button data-go="dash">Back to Markets</button></div></main>';
  var sec=(db.sectors||[]).map(function(s){return '<option'+(c&&c.sector===s?' selected':'')+'>'+esc(s)+'</option>'}).join('');
  return '<main><div class="dlg wide"><div class=card style="padding:24px">'
@@ -362,6 +371,7 @@ function companyForm(c){
  +'<label class=f><span>What it does<i id=n-desc>0/200</i></span><textarea id=f-desc maxlength=200 placeholder="Burgers and fries, made fresh on Main Street.">'+(c?esc(c.description||''):'')+'</textarea></label>'
  +(isNew?'<div class=row style="gap:12px"><label class=f><span>Starting price (Money)</span><input id=f-price type=number min=0.1 max=1000 step=0.01 placeholder="10.00"></label><label class=f><span>Shares outstanding</span><input id=f-shares type=number min=1000 max=10000000 step=1 placeholder="100000"></label></div><div class=note style="margin:-6px 0 14px">Price $0.10–$1,000 · 1,000–10,000,000 shares · tickers are 2–5 letters.</div>':'')
  +(isNew&&!db.admin||c&&c.owner?'<div class=note style="margin:-4px 0 14px">'+(isNew?'Your':'Its founder\'s')+' profile picture and checkmark are the company\'s picture and badge. Change '+(isNew?'your':'their')+' picture on '+(isNew?'your':'their')+' profile and the market follows.</div>':'')
+ +(isNew&&!db.admin&&!db.me.badge?'<div class="unv" style="margin:0 0 14px">'+SHIELD+'<div><b>Your company will be listed as unverified</b><span>Your account doesn\'t have a checkmark, so your company won\'t show one. '+unvText()+'</span></div></div>':'')
  +'<div class=err id=f-err></div><div class=row style="gap:8px"><button data-back>Cancel</button><button class=primary id=f-go>'+(isNew?'List company':'Save')+'</button></div></div></div></main>'}
 function formPreview(){var n=$('#f-name');if(!n)return;var t=$('#f-ticker'),p=$('#f-price'),s=$('#f-shares');$('#n-name').textContent=n.value.length+'/50';$('#n-desc').textContent=$('#f-desc').value.length+'/200';$('#pv-name').textContent=n.value||'Company name';
  var tk=t?t.value.toUpperCase().replace(/[^A-Z]/g,''):'';if(t&&t.value!==tk)t.value=tk;if(t)$('#pv-sub').textContent=(tk||'TICKER')+' · '+$('#f-sector').value;

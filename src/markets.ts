@@ -1,5 +1,5 @@
 // TradeX, Jye's play stock market, at /i/markets: staff (the admin role) and
-// accounts with a blue or gold checkmark list companies, prices drift a little
+// any account can list companies (checkmarked ones show as verified), prices drift a little
 // every two seconds, and every signed-in account trades with its money
 // (money.ts: the wallet's balance is the cash; a buy takes from it and a sale
 // pays into it, in the same transaction as the shares). Everyone sees the same
@@ -28,10 +28,9 @@ import { MONEY_ICON } from "./tidy";
 export const MARKETS_PATH = "/i/markets";
 const API = `${MARKETS_PATH}/api/`;
 const OWN_HOST = new URL(PUBLIC_ORIGIN).host;
-// what an account with a blue or gold checkmark may list (staff list any number)
+// what an account may list (staff list any number)
 export const SECTORS = ["Food & Drink", "Retail", "Technology", "Energy", "Transport", "Real Estate", "Finance", "Entertainment", "Health", "Industrial", "Services", "Other"];
 const OWN_MAX = 2;
-const LISTERS = ["blue", "business"]; // blue and gold checkmarks
 const HIST = 500; // price points kept per company (the original's cap)
 const HIST_SENT = 200; // the most the page draws (its widest range)
 const INDEX = 300; // market-cap points kept
@@ -239,7 +238,7 @@ async function account(viewer: Viewer) {
 	// the wallet is only made (with the instance's starting balance) once Money is on
 	const cents = on ? await balanceOf(viewer.id) : null;
 	const accepted = on ? await disclaimerAccepted(viewer.id) : false;
-	const canList = LISTERS.includes(u?.verified_type) && u?.status !== "restricted" && u?.status !== "suspended";
+	const canList = !!u && u.status !== "restricted" && u.status !== "suspended";
 	return {
 		handle: viewer.screen_name,
 		name: u?.name ?? viewer.screen_name,
@@ -315,7 +314,7 @@ async function trade(viewer: Viewer, body: any) {
 	changed++;
 }
 
-// ---------- listing: accounts with a blue or gold checkmark, and staff ----------
+// ---------- listing: any account in good standing, and staff ----------
 
 function cleanText(v: unknown, max: number) {
 	const t = String(v ?? "").replace(/\s+/g, " ").trim();
@@ -325,8 +324,7 @@ function cleanText(v: unknown, max: number) {
 }
 async function register(viewer: Viewer, b: any) {
 	const [u] = await sql`select verified_type, status from users where id = ${viewer.id}`;
-	if (!LISTERS.includes(u?.verified_type)) throw new Refusal("Only accounts with a blue or gold checkmark can list a company.", 403);
-	if (u.status === "restricted" || u.status === "suspended") throw new Refusal("Your account can't list a company right now.", 403);
+	if (!u || u.status === "restricted" || u.status === "suspended") throw new Refusal("Your account can't list a company right now.", 403);
 	const name = cleanText(b.name, 50), tk = String(b.ticker ?? "").trim().toUpperCase();
 	const sector = SECTORS.includes(b.sector) ? b.sector : null;
 	const description = cleanText(b.description, 200);
