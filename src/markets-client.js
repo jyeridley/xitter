@@ -33,6 +33,12 @@ button.buy{background:var(--up);border-color:var(--up);color:#fff}
 button.sell{background:var(--dn);border-color:var(--dn);color:#fff}
 button.danger{color:var(--dn);border-color:color-mix(in srgb,var(--dn) 45%,transparent)}
 button.small{min-height:30px;padding:0 12px;font-size:13px}
+.hbtns{display:flex;gap:8px;flex:0 0 auto;align-items:center}
+button.xp{display:inline-flex;align-items:center;gap:6px}
+button.xp svg{flex:0 0 auto}
+button.xp.busy svg{animation:xpb 1s ease-in-out infinite}
+@keyframes xpb{50%{transform:translateY(2px)}}
+@media(max-width:520px){button.xp{width:34px;min-height:34px;padding:0;justify-content:center}button.xp .xpl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}}
 button.big{min-height:44px;font-size:15px;width:100%}
 input,select,textarea{background:var(--field);border:1px solid var(--line);color:var(--txt);padding:10px 12px;border-radius:8px;font:inherit;width:100%;min-height:44px}
 html[data-theme=light] input,html[data-theme=light] select,html[data-theme=light] textarea{border-color:#cfd9de}
@@ -307,6 +313,11 @@ function maxQty(c){return S.side==='buy'?Math.floor(db.me.cash/c.price):Math.flo
 function updTicket(){var c=C(S.cid);if(!c||!$('#tk-go'))return;var q=Math.floor(+($('#qty').value||0));S.q=$('#qty').value;var tot=q>0?q*c.price:0,buy=S.side==='buy',after=buy?db.me.cash-tot:db.me.cash+tot;
  $('#tk-px').textContent=fp(c.price);$('#tk-tot').textContent=fmt(tot);var a=$('#tk-after');a.textContent=(after<0?'−':'')+fmt(Math.abs(after));a.className=after<0?'dn':'';
  var err=buy&&after<0?'Not enough money':!buy&&q>owned(c)?'You own '+qn(owned(c))+' shares':'';$('#tk-err').textContent=err;$('#tk-go').disabled=!!err||!(q>0)||BUSY}
+var EXPORT_ICON='<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5"/><path d="M4 15v3a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-3"/></svg>';
+var EXPORT_OK='<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+function exportImage(b){if(b.disabled)return;var tk=b.getAttribute('data-export'),lab=b.querySelector('.xpl');b.disabled=true;b.classList.add('busy');lab.textContent='Exporting…';
+ var done=function(ok){b.classList.remove('busy');b.innerHTML=(ok?EXPORT_OK:EXPORT_ICON)+'<span class=xpl>'+(ok?'Downloaded':'Couldn\'t export')+'</span>';setTimeout(function(){b.disabled=false;b.innerHTML=EXPORT_ICON+'<span class=xpl>Export image</span>'},2200)};
+ fetch('/i/markets/export.png?c='+encodeURIComponent(tk)+'&r='+S.range,{credentials:'same-origin'}).then(function(r){if(!r.ok)throw 0;return r.blob()}).then(function(bl){if(!bl.size)throw 0;var u=URL.createObjectURL(bl),a=document.createElement('a');a.href=u;a.download=tk+'-stock.png';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u)},4000);done(true)}).catch(function(){done(false)})}
 function coPage(){var c=C(S.cid);if(!c)return '<main><div class="card empty"><h2>Company not found</h2><p>It may have been delisted.</p><button data-go="list">Browse the market</button></div></main>';
  var news=db.headlines.filter(function(h){return h.ticker===c.ticker});
  var canEdit=db.me&&(db.admin||(c.owner&&c.owner.handle===db.me.handle));
@@ -315,7 +326,7 @@ function coPage(){var c=C(S.cid);if(!c)return '<main><div class="card empty"><h2
  var about='<div class=tile><div style="font-weight:800;margin-bottom:6px">About '+esc(c.name)+'</div><div style="margin-bottom:12px">'+(c.description?esc(c.description):'<span class=note>No description yet.</span>')+'</div>'+(c.owner?'<div class=lbl style="margin-bottom:6px">Founded by</div>'+founder(c.owner):'<div class=lbl>Listed by '+esc(db.instance)+' staff</div>')+'</div>';
  var newsP=news.length?'<div class=panel style="margin:0"><div class=hd><h3>News</h3></div><div class=list>'+news.slice(0,6).map(function(h){return '<div class=item style="cursor:default;display:block">'+(h.brk?'<span class="tag brk">BREAKING</span> ':'')+'<span class=lbl>'+esc(h.cat)+' · '+new Date(h.t).toLocaleDateString()+'</span><div style="margin-top:4px">'+esc(h.text)+'</div></div>'}).join('')+'</div></div>':'';
  return '<main>'+moneyBanner()+'<div class=wide2><div class=lcol style="display:flex;flex-direction:column;gap:12px;min-width:0"><div class=card style="padding:0;margin:0">'
- +'<div class=between style="padding:18px 18px 0;align-items:flex-start"><div style="display:flex;gap:14px;align-items:center;min-width:0">'+logo(c,'lg')+'<div style="min-width:0">'+nm(c,'coname')+'<div class=lbl>'+esc(c.ticker)+(c.sector?' · '+esc(c.sector):'')+(c.suspended?' · <span class="tag brk">SUSPENDED</span>':'')+'</div></div></div>'+(canEdit?'<button class=small data-go="edit" data-id="'+c.id+'" style="flex:0 0 auto">Edit</button>':'')+'</div>'
+ +'<div class=between style="padding:18px 18px 0;align-items:flex-start"><div style="display:flex;gap:14px;align-items:center;min-width:0">'+logo(c,'lg')+'<div style="min-width:0">'+nm(c,'coname')+'<div class=lbl>'+esc(c.ticker)+(c.sector?' · '+esc(c.sector):'')+(c.suspended?' · <span class="tag brk">SUSPENDED</span>':'')+'</div></div></div>'+'<div class=hbtns><button class="small xp" data-export="'+esc(c.ticker)+'" title="Download a picture of this stock" aria-label="Export image">'+EXPORT_ICON+'<span class=xpl>Export image</span></button>'+(canEdit?'<button class=small data-go="edit" data-id="'+c.id+'">Edit</button>':'')+'</div></div>'
  +'<div class=between style="padding:14px 18px 0;align-items:flex-end"><div><div class="big xl" id=px>'+fp(c.price)+'</div><div class=row style="gap:8px;margin-top:4px"><span id=chg style="flex:0 0 auto">'+pill(chg(c))+'</span><span class=lbl style="flex:0 0 auto">since listing</span></div></div>'
  +'<div style="display:flex;align-items:center;gap:12px"><span class=lbl><span class=pulse></span>Live</span><div class=seg>'+[[30,'1M'],[90,'3M'],[200,'All']].map(function(a){return '<button class="'+(S.range===a[0]?'on':'')+'" data-range="'+a[0]+'">'+a[1]+'</button>'}).join('')+'</div></div></div>'
  +'<div id=live style="margin-top:10px">'+coChart(c)+'</div>'
@@ -461,11 +472,12 @@ function render(){
  document.title=(S.page==='co'&&co?co.ticker+' · '+co.name:title)+' · '+db.instance;
 }
 document.addEventListener('click',function(e){
- var t=e.target.closest('[data-go],[data-ir],[data-range],[data-side],[data-step],[data-preset],[data-a],[data-back],[data-client],[data-accept],#tk-go,#f-go');if(!t)return;
+ var t=e.target.closest('[data-export],[data-go],[data-ir],[data-range],[data-side],[data-step],[data-preset],[data-a],[data-back],[data-client],[data-accept],#tk-go,#f-go');if(!t)return;
  if(t.hasAttribute('data-client')){e.preventDefault();client(t.getAttribute('data-client'));return}
  if(t.hasAttribute('data-go')){e.preventDefault();go(t.getAttribute('data-go'),t.getAttribute('data-id')||undefined);return}
  if(t.hasAttribute('data-back')){e.preventDefault();if(!framed&&S.page==='dash'){location.assign('/home');return}var c=C(S.cid);if(S.page==='edit'&&c)go('co',c.id);else if(S.page==='co'||S.page==='new'||S.page==='edit')go(Q.get('from')||'list');else client('/home');return}
  if(t.hasAttribute('data-ir')){S.ir=+t.getAttribute('data-ir');render();return}
+ if(t.hasAttribute('data-export')){e.preventDefault();exportImage(t);return}
  if(t.hasAttribute('data-range')){S.range=+t.getAttribute('data-range');render();return}
  if(t.hasAttribute('data-side')){S.side=t.getAttribute('data-side');render();return}
  if(t.hasAttribute('data-accept')){t.disabled=true;api('accept',{}).then(function(st){db=st;render()},function(er){toast(er.message,true);t.disabled=false});return}

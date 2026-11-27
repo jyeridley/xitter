@@ -701,6 +701,121 @@ async function ogImage(ticker: string | null): Promise<Buffer> {
 	return p;
 }
 
+// ---------- a stock's picture to download (the Export image button) ----------
+
+// DejaVu Sans Bold's advance widths, near enough to set the checkmark after a name
+function textWidth(t: string, size: number): number {
+	let w = 0;
+	for (const ch of t) {
+		if (/[ilj'|.,:;!]/.test(ch)) w += 0.34;
+		else if (/[ftrI ]/.test(ch)) w += 0.45;
+		else if (/[mwMW]/.test(ch)) w += 1.04;
+		else if (/[A-Z]/.test(ch)) w += 0.77;
+		else if (/[0-9a-z]/.test(ch)) w += 0.68;
+		else w += 0.8;
+	}
+	return w * size;
+}
+function fitText(t: string, size: number, max: number): string {
+	if (textWidth(t, size) <= max) return t;
+	let s = t;
+	while (s.length > 1 && textWidth(s + "…", size) > max) s = s.slice(0, -1);
+	return s.trimEnd() + "…";
+}
+// a smooth line through the points (Catmull-Rom as cubic Béziers)
+function smoothPath(pts: [number, number][]): string {
+	if (pts.length < 3) return "M" + pts.map((p) => p.map((n) => n.toFixed(1)).join(",")).join(" L");
+	let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
+	for (let i = 0; i < pts.length - 1; i++) {
+		const p0 = pts[i - 1] ?? pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] ?? p2;
+		const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6], c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+		d += ` C${c1[0].toFixed(1)},${c1[1].toFixed(1)} ${c2[0].toFixed(1)},${c2[1].toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+	}
+	return d;
+}
+const RANGES: Record<string, [number, string]> = { "30": [30, "1M"], "90": [90, "3M"], "200": [200, "All"] };
+function exportSvg(c: Company, range: number, label: string, pic: string | null, check: string | null): string {
+	const FONT = "DejaVu Sans, Helvetica, Arial, sans-serif";
+	const W = 1200, H = 675, S = 2;
+	const hist = c.hist.slice(-range).map((h) => h[1]);
+	const values = hist.length ? hist : [c.price];
+	const change = pct(c.price, c.prevClose), up = change >= 0;
+	const lo = Math.min(...values), hi = Math.max(...values);
+	const col = (values.length > 1 ? values[values.length - 1] >= values[0] : up) ? "#22c55e" : "#ef4444";
+	// the chart
+	const cx = 48, cy = 250, cw = W - 96, ch = 250;
+	let chart = "";
+	if (values.length > 1) {
+		const r = hi - lo || 1;
+		const pts = values.map((y, i): [number, number] => [cx + (i / (values.length - 1)) * cw, cy + 10 + (1 - (y - lo) / r) * (ch - 20)]);
+		const d = smoothPath(pts);
+		const grid = [0, 1, 2, 3].map((k) => `<line x1="${cx}" x2="${cx + cw}" y1="${(cy + (k * ch) / 3).toFixed(1)}" y2="${(cy + (k * ch) / 3).toFixed(1)}" stroke="#1f2327" stroke-width="1"/>`).join("");
+		const last = pts[pts.length - 1];
+		chart = `${grid}<defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${col}" stop-opacity=".35"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>`
+			+ `<path d="${d} L${(cx + cw).toFixed(1)},${cy + ch} L${cx},${cy + ch} Z" fill="url(#fill)"/>`
+			+ `<path d="${d}" fill="none" stroke="${col}" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>`
+			+ `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="7" fill="${col}" fill-opacity=".25"/><circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="4" fill="${col}"/>`;
+	} else chart = `<text x="${W / 2}" y="${cy + ch / 2}" font-size="22" fill="#71767b" text-anchor="middle">No trading history yet</text>`;
+	// the face: rounded square for organisations, circle for people, the ticker when there's no picture
+	const ax = 48, ay = 44, as = 88;
+	const shape = c.sq ? `<rect x="${ax}" y="${ay}" width="${as}" height="${as}" rx="20"/>` : `<circle cx="${ax + as / 2}" cy="${ay + as / 2}" r="${as / 2}"/>`;
+	const face = pic
+		? `<defs><clipPath id="pf">${shape}</clipPath></defs><rect x="${ax}" y="${ay}" width="${as}" height="${as}" fill="#202327" clip-path="url(#pf)"/><image x="${ax}" y="${ay}" width="${as}" height="${as}" preserveAspectRatio="xMidYMid slice" clip-path="url(#pf)" href="${pic}"/>`
+		: `<g fill="#202327">${shape}</g><text x="${ax + as / 2}" y="${ay + as / 2 + 8}" font-size="22" font-weight="800" fill="#8b98a5" text-anchor="middle">${esc(c.ticker.slice(0, 4))}</text>`;
+	const tx = ax + as + 20;
+	const name = fitText(c.name, 34, W - 48 - Math.max(textWidth(fmtP(c.price), 50), 300) - tx - 70);
+	const nx = tx + textWidth(name, 34) + 10;
+	const b = badgeSvg(c.owner?.badge);
+	const mark = check ? `<image x="${nx.toFixed(0)}" y="${ay + 6}" width="34" height="34" href="${check}"/>` : b ? `<g transform="translate(${nx.toFixed(0)} ${ay + 8}) scale(1.45)">${b}</g>` : "";
+	const sub = `${esc(c.ticker)}${c.sector ? ` · ${esc(c.sector)}` : ""}${c.suspended ? " · SUSPENDED" : ""}`;
+	// the price and how it moved, top right
+	const pillText = `${up ? "▲" : "▼"} ${Math.abs(change).toFixed(2)}%`, pw = 40 + pillText.length * 14;
+	const price = `<text x="${W - 48}" y="${ay + 50}" font-size="50" font-weight="800" fill="#ffffff" text-anchor="end">${fmtP(c.price)}</text>`
+		+ `<rect x="${W - 48 - pw}" y="${ay + 66}" width="${pw}" height="38" rx="19" fill="${up ? "#123524" : "#3a1616"}"/><text x="${W - 48 - pw / 2}" y="${ay + 92}" font-size="21" font-weight="700" fill="${up ? "#4ade80" : "#f87171"}" text-anchor="middle">${pillText}</text>`
+		+ `<text x="${W - 60 - pw}" y="${ay + 92}" font-size="18" fill="#71767b" text-anchor="end">since listing</text>`;
+	const tag = `<rect x="48" y="${cy - 52}" width="64" height="30" rx="15" fill="#16181c" stroke="#2f3336"/><text x="80" y="${cy - 31}" font-size="16" font-weight="700" fill="#e7e9ea" text-anchor="middle">${label}</text>`
+		+ `<text x="124" y="${cy - 31}" font-size="16" fill="#71767b">Price history</text>`;
+	// the key numbers
+	const stats: [string, string][] = [["Market cap", big(c.price * c.shares)], ["Volume", Math.round(c.volume).toLocaleString("en-US")], [`Range (${label})`, `${fmtP(lo)} – ${fmtP(hi)}`], ["Shares", Math.round(c.shares).toLocaleString("en-US")]];
+	const sy = cy + ch + 22, colW = (W - 96) / 4;
+	const row = `<rect x="48" y="${sy}" width="${W - 96}" height="76" rx="16" fill="#0e1012" stroke="#1f2327"/>`
+		+ stats.map(([k, v], i) => `<text x="${72 + i * colW}" y="${sy + 30}" font-size="16" fill="#71767b">${esc(k)}</text><text x="${72 + i * colW}" y="${sy + 58}" font-size="22" font-weight="700" fill="#e7e9ea">${esc(fitText(v, 22, colW - 30))}</text>`).join("");
+	const foot = `<text x="48" y="${H - 22}" font-size="17" font-weight="700" fill="#8b98a5">${esc(settings().instance_name)} Markets</text>`
+		+ `<text x="${W - 48}" y="${H - 22}" font-size="17" fill="#71767b" text-anchor="end">${esc(OWN_HOST)}</text>`;
+	return `<svg xmlns="http://www.w3.org/2000/svg" width="${W * S}" height="${H * S}" viewBox="0 0 ${W} ${H}" font-family="${FONT}">
+<rect width="${W}" height="${H}" fill="#000"/>
+${face}<text x="${tx}" y="${ay + 36}" font-size="34" font-weight="700" fill="#e7e9ea">${esc(name)}</text>${mark}
+<text x="${tx}" y="${ay + 72}" font-size="22" fill="#71767b">${sub}</text>
+${price}${tag}${chart}${row}${foot}
+</svg>`;
+}
+// the picture the page shows: the founder's or the logo, else the site's default one; anything else (an outside address) draws the ticker
+async function exportPicture(c: Company): Promise<string | null> {
+	const pic = await ogPicture(c);
+	if (pic || c.img !== DEFAULT_PFP) return pic;
+	try {
+		return `data:image/png;base64,${readFileSync(join(import.meta.dir, "..", "client", DEFAULT_PFP)).toString("base64")}`;
+	} catch {
+		return null;
+	}
+}
+const exports_ = new Map<string, Promise<Buffer>>();
+async function exportImage(ticker: string | null, r: string | null): Promise<Buffer | null> {
+	const s = await shared();
+	const c = companyBy(s, ticker);
+	if (!c) return null;
+	const [range, label] = RANGES[r ?? ""] ?? RANGES["90"];
+	const key = `${c.ticker}:${range}:${Math.floor(Date.now() / 15000)}`;
+	let p = exports_.get(key);
+	if (!p) {
+		p = Promise.all([exportPicture(c), checkArt(c.owner?.badge)]).then(([pic, check]) => png(exportSvg(c, range, label, pic, check)));
+		exports_.set(key, p);
+		p.catch(() => exports_.delete(key));
+		if (exports_.size > 20) exports_.delete(exports_.keys().next().value!);
+	}
+	return p;
+}
+
 // ---------- a link to the market in a post: its card (posts.ts) ----------
 
 export function isMarketLink(url: string): boolean {
@@ -747,6 +862,14 @@ export async function marketsRoute(req: Request, p: string, viewer: Viewer | und
 		const top = p !== `${MARKETS_PATH}/embed` && req.headers.get("sec-fetch-dest") === "document" && !url.searchParams.has("embed");
 		if (top && opts.clientShell) return undefined;
 		return page(req, viewer);
+	}
+	if (p === `${MARKETS_PATH}/export.png`) {
+		const h = hit("read", viewer ? `user:${viewer.id}` : `guest:${opts.ip}`);
+		if (!h.ok) return limitedResponse(h);
+		const body = await exportImage(url.searchParams.get("c"), url.searchParams.get("r"));
+		if (!body) return new Response("not found", { status: 404 });
+		const t = (companyBy(await shared(), url.searchParams.get("c"))?.ticker ?? "stock").replace(/[^A-Za-z0-9_-]/g, "");
+		return new Response(body, { headers: { "content-type": "image/png", "content-disposition": `attachment; filename="${t}-stock.png"`, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 	}
 	if (p === `${MARKETS_PATH}/og.png`) {
 		const body = await ogImage(url.searchParams.get("c"));
