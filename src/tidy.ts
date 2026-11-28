@@ -101,7 +101,7 @@ const CIRCLE = "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 
 const TONE = "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 1.8v14.4a7.2 7.2 0 0 0 0-14.4z";
 const HISTORY = "M480-120q-138 0-240.5-91.5T122-440h82q14 104 92.5 172T480-200q117 0 198.5-81.5T760-480q0-117-81.5-198.5T480-760q-69 0-129 32t-101 88h110v80H120v-240h80v94q51-64 124.5-99T480-840q75 0 140.5 28.5t114 77q48.5 48.5 77 114T840-480q0 75-28.5 140.5t-77 114q-48.5 48.5-114 77T480-120Zm112-192L440-464v-216h80v184l128 128-56 56Z";
 const GIF = "M120-120v-720h720v720H120Zm80-80h560v-560H200v560Zm80-80h400L560-520 440-360l-80-100-80 180Zm40-280q25 0 42.5-17.5T380-700q0-25-17.5-42.5T320-760q-25 0-42.5 17.5T260-700q0 25 17.5 42.5T320-660Z";
-// a line going up: TradeX
+// a line going up: the BSE
 const MARKETS_ICON = "M16 6l2.29 2.29-4.88 4.88-4-4L2 16.59 3.41 18l6-6 4 4 6.3-6.29L22 12V6z";
 const CAT = "M5 3.5 9.2 7.6A9 9 0 0 1 12 7.2a9 9 0 0 1 2.8.4L19 3.5V12a7 7 0 0 1-14 0V3.5Zm4.5 8.3a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm5 0a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Z";
 // four tiles: the admin panel
@@ -120,8 +120,8 @@ export async function menuLinks(userId: string): Promise<MenuLink[]> {
 		links.push({ href: "/account/money", text: "Money", description: "Send money to other accounts.", icon: MONEY_ICON, iconOn: MONEY_ICON_FILLED, where: "nav" });
 		links.push({ href: "/account/merchant", text: "Money", description: "Merchant mode: payments to your organisation read as purchases.", icon: MONEY_ICON, where: "settings" });
 	}
-	// TradeX, the play stock market (markets.ts)
-	links.push({ href: "/i/markets/embed", text: "Markets", description: "Trade on the play stock market.", icon: MARKETS_ICON, where: "nav" });
+	// BSE, the Bloxburg Stock Exchange (markets.ts)
+	links.push({ href: "/i/markets/embed", text: "BSE", description: "Trade on the Bloxburg Stock Exchange.", icon: MARKETS_ICON, where: "nav" });
 	if (s.ads.enabled) links.push({ href: "/account/ads", text: "Ads Manager", description: "Run ads with Money.", icon: MEGAPHONE, viewBox: "0 -960 960 960", where: "nav" });
 	links.push({ href: "/account/apps", text: "Connected apps", description: "Review and remove apps authorized to use your account.", icon: CODE, viewBox: "0 -960 960 960", where: "settings" });
 	if (s.invite_quota.enabled && s.signup_mode === "invite")
@@ -306,7 +306,7 @@ export const TIDY_SCRIPT = `(function(){
 		var name=f.getAttribute("data-name"),d;
 		try{d=f.contentDocument}catch(e){}
 		if(!name||!d)return;
-		// (the election page and TradeX borrow the Bookmarks screen, whose header says so on a phone)
+		// (the election page and the BSE borrow the Bookmarks screen, whose header says so on a phone)
 		var borrowed=!!WHOLE[location.pathname];
 		var h=[].find.call(document.querySelectorAll('h2[role="heading"]'),function(h){return h.hasAttribute("data-xitter-head")||h.textContent==="Not found"||borrowed&&/^(All )?Bookmarks$/.test(h.textContent)&&h.getClientRects().length>0});
 		if(h&&borrowed){var row=h;for(var i=0;i<6&&row.parentElement;i++)row=row.parentElement;[].forEach.call(row.querySelectorAll('button[aria-label="Create a Folder"]'),function(b){b.style.visibility="hidden"})}
@@ -327,7 +327,7 @@ export const TIDY_SCRIPT = `(function(){
 	}
 	function pane(){
 		var p=location.pathname,f=document.getElementById("xitter-pane"),base=framed(p);
-		// TradeX takes the side bar's room too: its trading screens want the width
+		// the BSE takes the side bar's room too: its trading screens want the width
 		document.documentElement.toggleAttribute("data-xitter-wide",p==="/i/markets"||p==="/i/markets/");
 		document.documentElement.toggleAttribute("data-xitter-full",!!(base&&fullOf(p)&&f&&f.hasAttribute("data-col")));
 		if(!base){if(f){stopPaneFit();f.remove()}since=0;return}

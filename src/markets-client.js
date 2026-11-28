@@ -104,6 +104,18 @@ img.logo-img{border:1px solid var(--line);box-sizing:border-box}
 .empty h2{font-size:26px;font-weight:800;margin:0 0 8px;letter-spacing:-.02em}
 .empty p{color:var(--mut);margin:0 auto 20px;max-width:400px}
 .note{color:var(--mut);font-size:14px}
+.bsehead{display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:8;background:color-mix(in srgb,var(--bg) 88%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+.bsehead .wordmark{display:flex;align-items:baseline;gap:10px;color:var(--txt);text-decoration:none;font-weight:800}
+.bsehead .wordmark:hover{text-decoration:none}
+.bsehead .bse{font-size:22px;letter-spacing:.12em}
+.bsehead .bname{font-size:13px;font-weight:600;color:var(--mut);letter-spacing:0}
+.bsehead .grow{flex:1}
+.bsehead .glink{color:var(--mut);font-size:13px;font-weight:600;white-space:nowrap}
+.bsehead .me{display:flex;align-items:center;gap:8px;color:var(--txt);text-decoration:none;font-weight:700;font-size:13px}
+.bsehead .me:hover{text-decoration:none}
+.bsehead .me img{width:28px;height:28px;border-radius:50%;object-fit:cover;background:var(--card2)}
+@media(max-width:600px){.bsehead .bname{display:none}}
+
 .unv{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:12px;background:color-mix(in srgb,#f59e0b 10%,transparent);border:1px solid color-mix(in srgb,#f59e0b 32%,transparent);color:var(--txt);font-size:13px;line-height:1.4}
 .unv svg{flex:0 0 auto;color:#f59e0b;margin-top:1px}.unv b{display:block;font-size:14px;margin-bottom:1px}.unv span{color:var(--mut)}
 .cknote{display:flex;gap:8px;align-items:center;justify-content:center;color:var(--mut);font-size:13px;padding:16px 12px 4px;text-align:left}.cknote svg{flex:0 0 auto;opacity:.8}
@@ -172,9 +184,9 @@ details.card summary{list-style:none;cursor:pointer;font-weight:800;font-size:17
 @media(max-width:700px){.stats{grid-template-columns:repeat(2,1fr)}.m{display:none}main{padding:10px 12px 20px}.big{font-size:28px}.spark{width:56px}.item{padding:12px}}
 /*---SCRIPT---*/
 (function(){
-var B=window.TRADEX,CSRF=B.csrf,COIN=B.coin;
+var B=window.TRADEX,CSRF=B.csrf,COIN=B.coin,SITE=B.site||'app',HOME=B.home||'',BSE_NAME=B.name||'Bloxburg Stock Exchange',BSE_SHORT=B.short||'BSE';
 var db=B.state;
-var framed=window.top!==window;
+var framed=window.top!==window && SITE!=='bse';
 var $=function(s){return document.querySelector(s)};
 var esc=function(s){return String(s==null?'':s).replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]})};
 var fmt=function(n){return '$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})};
@@ -190,8 +202,22 @@ var C=function(id){return db.companies.find(function(x){return x.id===id})};
 var CT=function(t){return db.companies.find(function(x){return x.ticker===String(t||'').toUpperCase()})};
 var Q=new URLSearchParams(location.search);
 var PAGES=['list','acct','admin','new','edit'];
-var S={page:Q.get('c')&&Q.get('p')!=='edit'?'co':(PAGES.indexOf(Q.get('p'))>=0?Q.get('p'):'dash'),cid:null,range:90,ir:150,side:'buy',q:'',find:''};
-if(Q.get('c')){var c0=CT(Q.get('c'));S.cid=c0?c0.id:null}
+function bootRoute(){
+ if(SITE==='bse'){
+  var path=location.pathname.replace(/\/+$/,'')||'/';
+  if(path==='/markets'||path==='/list')return {page:'list'};
+  if(path==='/portfolio')return {page:'acct'};
+  if(path==='/admin')return {page:'admin'};
+  if(path==='/new'||path==='/list-company')return {page:'new'};
+  var m=path.match(/^\/c\/([A-Za-z]{2,5})(?:\/(edit))?$/i);
+  if(m)return {page:m[2]?'edit':'co',ticker:m[1]};
+  return {page:Q.get('c')?'co':'dash',ticker:Q.get('c')};
+ }
+ return {page:Q.get('c')&&Q.get('p')!=='edit'?'co':(PAGES.indexOf(Q.get('p'))>=0?Q.get('p'):'dash'),ticker:Q.get('c')};
+}
+var R=bootRoute();
+var S={page:R.page,cid:null,range:90,ir:150,side:'buy',q:'',find:''};
+if(R.ticker){var c0=CT(R.ticker);S.cid=c0?c0.id:null}
 var AD=null,EDIT=null,BUSY=false;
 
 /* ---------- the client's theme and colour ---------- */
@@ -211,13 +237,26 @@ function api(path,body){
  return fetch('/i/markets/api/'+path,body===undefined?{credentials:'same-origin'}:{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json','x-csrf-token':CSRF||''},body:JSON.stringify(body)})
   .then(function(r){return r.json().catch(function(){return {error:'Something went wrong'}}).then(function(j){if(!r.ok)throw new Error(j.error||(j.errors&&j.errors[0]&&j.errors[0].message)||'Something went wrong');return j})});
 }
-function go(p,x){
+function pathOf(p,x){
+ if(SITE==='bse'){
+  if(p==='dash')return '/';
+  if(p==='list')return '/markets';
+  if(p==='acct')return '/portfolio';
+  if(p==='admin')return '/admin';
+  if(p==='new')return '/new';
+  var c=C(x);var tk=c?c.ticker:x;
+  if(p==='edit')return '/c/'+tk+'/edit';
+  return '/c/'+tk;
+ }
  var q=new URLSearchParams();
  if(Q.has('embed'))q.set('embed',Q.get('embed'));
  if(p==='co'||p==='edit'){var c=C(x);q.set('c',c?c.ticker:x)}
  if(p!=='dash'&&p!=='co')q.set('p',p);
- var s=q.toString();location.assign(location.pathname+(s?'?'+s:''));
+ var s=q.toString();
+ return (location.pathname.indexOf('/i/markets')===0?location.pathname:'/i/markets')+(s?'?'+s:'');
 }
+function go(p,x){location.assign(pathOf(p,x))}
+function signInHref(){return SITE==='bse'?'/login?next='+encodeURIComponent(location.pathname+location.search):'/i/flow/login'}
 // links to the client's own pages move the client, not the frame
 function client(path){try{if(framed&&parent.__xitterGo){parent.__xitterGo(path);return}}catch(e){}top.location.assign(path)}
 var toastT;
@@ -263,7 +302,7 @@ var SHIELD='<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" f
 function verified(c){return !!(c&&c.owner&&c.owner.badge)}
 function unvText(){return 'Companies without a checkmark aren\'t officially verified by '+esc(db.instance||'us')+'.'}
 function unvBanner(){return '<div class=unv role=note>'+SHIELD+'<div><b>Unverified company</b><span>'+unvText()+' Do your own research before trading.</span></div></div>'}
-function checkNote(){return '<div class=cknote>'+SHIELD+'<span>A checkmark next to a company means its founder is verified. '+unvText()+'</span></div>'}
+function checkNote(){return '<div class=cknote>'+SHIELD+'<span>A checkmark next to a company means its founder is verified. '+unvText()+(SITE!=='bse'&&B.bse?' <a href="'+esc(B.bse)+'">Open the BSE site</a>':'')+'</span></div>'}
 function listCta(){
  if(!db.me)return '';
  if(db.me.canList)return '<div class="tile between" style="margin-bottom:12px"><div><div style="font-weight:800">List your company</div><div class=lbl>'+(db.admin?'Staff can list any number of companies.':'Any account can list up to '+db.me.ownMax+' companies ('+db.me.owned+' listed).'+(db.me.badge?'':' Without a checkmark, yours show as unverified.'))+'</div></div><button class=primary data-go="new" style="flex:0 0 auto">List a company</button></div>';
@@ -306,7 +345,7 @@ function holdingsValue(){if(!db.me)return 0;return Object.keys(db.me.holdings).r
 function owned(c){var h=db.me&&db.me.holdings[c.id];return h?h.qty:0}
 function coChart(c){return chart(c.hist.slice(-S.range),'co'+c.id,innerWidth<700?220:320)}
 function ticket(c){
- if(!db.me)return '<div class=tile><div style="font-weight:800;margin-bottom:4px">Trade '+esc(c.ticker)+'</div><div class=note style="margin-bottom:12px">Sign in to buy and sell with your money.</div><button class="primary big" data-client="/i/flow/login">Sign in</button></div>';
+ if(!db.me)return '<div class=tile><div style="font-weight:800;margin-bottom:4px">Trade '+esc(c.ticker)+'</div><div class=note style="margin-bottom:12px">Sign in to buy and sell with your money.</div><button class="primary big" data-client="'+signInHref()+'">Sign in</button></div>';
  if(!db.money.on)return '<div class=tile><div style="font-weight:800;margin-bottom:4px">Trade '+esc(c.ticker)+'</div><div class=note>Trading opens when Money is turned on.</div></div>';
  if(!db.me.accepted)return '<div class=tile><div style="font-weight:800;margin-bottom:6px">Before you trade</div><div class=note style="margin-bottom:12px">'+esc(db.money.disclaimer||'')+'</div><button class="primary big" data-accept>Accept and continue</button></div>';
  if(c.suspended)return '<div class=tile><div style="font-weight:800;margin-bottom:4px">Trading paused</div><div class=note>This listing is suspended.</div></div>';
@@ -346,7 +385,7 @@ function updateLive(){var c=C(S.cid);if(!c)return;var l=$('#live');if(l&&!l.quer
 function trade(){var c=C(S.cid),q=Math.floor(+$('#qty').value);
  if(!c||!(q>0)||BUSY)return;BUSY=true;$('#tk-go').disabled=true;
  api('trade',{id:c.id,side:S.side,qty:q}).then(function(st){BUSY=false;db=st;S.q='';render();toast((S.side==='buy'?'Bought ':'Sold ')+qn(q)+' '+c.ticker+' for '+fmt(q*c.price))},function(e){BUSY=false;toast(e.message,true);updTicket()})}
-function acct(){if(!db.me)return '<main><div class="card empty"><h2>Your portfolio</h2><p>Sign in to trade with your money.</p><button class=primary data-client="/i/flow/login">Sign in</button></div></main>';
+function acct(){if(!db.me)return '<main><div class="card empty"><h2>Your portfolio</h2><p>Sign in to trade with your money.</p><button class=primary data-client="'+signInHref()+'">Sign in</button></div></main>';
  var a=db.me;
  var rows=Object.keys(a.holdings).map(function(id){var c=C(id),p=a.holdings[id];return c?{c:c,qty:p.qty,cost:p.cost,v:c.price*p.qty}:null}).filter(Boolean).sort(function(x,y){return y.v-x.v});
  var val=rows.reduce(function(s,e){return s+e.v},0),cost=rows.reduce(function(s,e){return s+e.cost},0),ret=val-cost;
@@ -360,8 +399,8 @@ function acct(){if(!db.me)return '<main><div class="card empty"><h2>Your portfol
 function companyForm(c){
  var isNew=!c;
  if(!db.me)return '<main><div class="card empty"><h2>List a company</h2><p>Sign in first.</p></div></main>';
- if(isNew&&!db.me.canList)return '<main><div class="card empty"><h2>List a company</h2><p>Your account can\'t list a company right now.</p><button data-go="dash">Back to Markets</button></div></main>';
- if(isNew&&db.me.ownMax!=null&&db.me.owned>=db.me.ownMax)return '<main><div class="card empty"><h2>You\'ve listed '+db.me.owned+' companies</h2><p>Each account can list up to '+db.me.ownMax+'.</p><button data-go="dash">Back to Markets</button></div></main>';
+ if(isNew&&!db.me.canList)return '<main><div class="card empty"><h2>List a company</h2><p>Your account can\'t list a company right now.</p><button data-go="dash">Back to the BSE</button></div></main>';
+ if(isNew&&db.me.ownMax!=null&&db.me.owned>=db.me.ownMax)return '<main><div class="card empty"><h2>You\'ve listed '+db.me.owned+' companies</h2><p>Each account can list up to '+db.me.ownMax+'.</p><button data-go="dash">Back to the BSE</button></div></main>';
  var sec=(db.sectors||[]).map(function(s){return '<option'+(c&&c.sector===s?' selected':'')+'>'+esc(s)+'</option>'}).join('');
  return '<main><div class="dlg wide"><div class=card style="padding:24px">'
  +'<div class=h2>'+(isNew?'List a company':'Edit '+esc(c.ticker))+'</div><div class=note style="margin-bottom:18px">'+(isNew?'It trades in Money from the moment it\'s listed. '+(db.admin?'':'You\'re shown as its founder.'):'The ticker, share count and price are set by staff.')+'</div>'
@@ -464,28 +503,35 @@ var ADMIN={
 /* ---------- ROUTER ---------- */
 var BACK='<svg viewBox="0 0 24 24"><path d="M7.414 13l5.043 5.04-1.414 1.42L3.586 12l7.457-7.46 1.414 1.42L7.414 11H21v2H7.414z"/></svg>';
 function tabs(){return [['dash','Overview'],['list','Markets']].concat(db.me?[['acct','Portfolio']]:[]).concat(db.admin?[['admin','Admin']]:[])}
+function siteHead(){
+ if(SITE!=='bse')return '';
+ var me=db.me;
+ return '<header class=bsehead><a class=wordmark href="/" data-go="dash"><span class=bse>'+esc(BSE_SHORT)+'</span><span class=bname>'+esc(BSE_NAME)+'</span></a><div class=grow></div>'
+  +(me?'<a class=me href="/portfolio" data-go="acct">'+(me.avatar?'<img src="'+esc(me.avatar)+'" alt="">':'')+'<b>@'+esc(me.handle)+'</b></a><a class=glink href="/logout">Log out</a>':'<a class="small primary" href="'+esc(signInHref())+'">Sign in</a>')
+  +(HOME?'<a class=glink href="'+esc(HOME)+'">'+esc(db.instance||'Bloxburg Social')+'</a>':'')+'</header>';
+}
 function render(){
  var co=(S.page==='co'||S.page==='edit')&&C(S.cid);
- var title=S.page==='co'&&co?co.ticker:S.page==='new'?'List a company':S.page==='edit'&&co?'Edit '+co.ticker:'Markets';
- var sub=S.page==='co'&&co?esc(co.name):db.me&&db.me.cash!=null?coin+fmt(db.me.cash)+' in Money':'TradeX · '+esc(db.money.name);
- var back=S.page==='co'||S.page==='new'||S.page==='edit'||!framed;
+ var title=S.page==='co'&&co?co.ticker:S.page==='new'?'List a company':S.page==='edit'&&co?'Edit '+co.ticker:BSE_SHORT;
+ var sub=S.page==='co'&&co?esc(co.name):db.me&&db.me.cash!=null?coin+fmt(db.me.cash)+' in Money':BSE_NAME;
+ var back=S.page==='co'||S.page==='new'||S.page==='edit'||(!framed&&SITE!=='bse');
  var bar='<div class=bar>'+(back?'<button class=iconbtn data-back aria-label="Back">'+BACK+'</button>':'')+'<div class=grow><h1>'+esc(title)+'</h1><div class=sub>'+sub+'</div></div>'+(db.me&&db.me.canList&&S.page!=='new'&&S.page!=='edit'?'<button class="small primary" data-go="new" style="flex:0 0 auto">List a company</button>':'')+'</div>';
- var nav=S.page==='new'||S.page==='edit'?'':'<nav class=tabs>'+tabs().map(function(t){return '<a href="#" data-go="'+t[0]+'" class="'+(S.page===t[0]||(t[0]==='list'&&S.page==='co')?'on':'')+'">'+t[1]+'</a>'}).join('')+'</nav>';
+ var nav=S.page==='new'||S.page==='edit'?'':'<nav class=tabs>'+tabs().map(function(t){return '<a href="'+pathOf(t[0])+'" data-go="'+t[0]+'" class="'+(S.page===t[0]||(t[0]==='list'&&S.page==='co')?'on':'')+'">'+t[1]+'</a>'}).join('')+'</nav>';
  var body={dash:dash,list:list,co:coPage,acct:acct,admin:adminPage,new:function(){return companyForm(null)},edit:function(){return co?companyForm(co):coPage()}}[S.page]();
  var y=window.scrollY,old=$('.bar'),hid=!!(old&&old.hidden),f=document.activeElement&&document.activeElement.id,sel=f&&document.activeElement.selectionStart;
- $('#app').innerHTML=bar+nav+body;
+ $('#app').innerHTML=siteHead()+bar+nav+body;
  // the client's own header stands in for ours on a phone (tidy.ts)
  if(hid)$('.bar').hidden=true;
  if(f&&$('#'+f)){var el=$('#'+f);el.focus();try{if(sel!=null)el.setSelectionRange(sel,sel)}catch(e){}}
  window.scrollTo(0,y);
  updTicket();formPreview();
- document.title=(S.page==='co'&&co?co.ticker+' · '+co.name:title)+' · '+db.instance;
+ document.title=S.page==='co'&&co?co.ticker+' · '+co.name+' · '+BSE_SHORT:(SITE==='bse'?BSE_NAME:BSE_SHORT+' · '+db.instance);
 }
 document.addEventListener('click',function(e){
  var t=e.target.closest('[data-export],[data-go],[data-ir],[data-range],[data-side],[data-step],[data-preset],[data-a],[data-back],[data-client],[data-accept],#tk-go,#f-go');if(!t)return;
  if(t.hasAttribute('data-client')){e.preventDefault();client(t.getAttribute('data-client'));return}
  if(t.hasAttribute('data-go')){e.preventDefault();go(t.getAttribute('data-go'),t.getAttribute('data-id')||undefined);return}
- if(t.hasAttribute('data-back')){e.preventDefault();if(!framed&&S.page==='dash'){location.assign('/home');return}var c=C(S.cid);if(S.page==='edit'&&c)go('co',c.id);else if(S.page==='co'||S.page==='new'||S.page==='edit')go(Q.get('from')||'list');else client('/home');return}
+ if(t.hasAttribute('data-back')){e.preventDefault();if(!framed&&S.page==='dash'){location.assign(SITE==='bse'&&HOME?HOME:'/home');return}var c=C(S.cid);if(S.page==='edit'&&c)go('co',c.id);else if(S.page==='co'||S.page==='new'||S.page==='edit')go(Q.get('from')||'list');else client('/home');return}
  if(t.hasAttribute('data-ir')){S.ir=+t.getAttribute('data-ir');render();return}
  if(t.hasAttribute('data-export')){e.preventDefault();exportImage(t);return}
  if(t.hasAttribute('data-range')){S.range=+t.getAttribute('data-range');render();return}

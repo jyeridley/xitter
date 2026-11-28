@@ -1,10 +1,10 @@
-// TradeX, Jye's play stock market, at /i/markets: staff (the admin role) and
+// BSE, the Bloxburg Stock Exchange, at /i/markets and trade.bs.xitter.space: staff (the admin role) and
 // any account can list companies (checkmarked ones show as verified), prices drift a little
 // every two seconds, and every signed-in account trades with its money
 // (money.ts: the wallet's balance is the cash; a buy takes from it and a sale
 // pays into it, in the same transaction as the shares). Everyone sees the same
 // market (Postgres); signed out, or with Money off, it's read-only. A port
-// of Jye's one-file tradex.html, whose page script is markets-client.js.
+// of Jye's one-file tradex.html, whose page script is markets-client.js. The BSE name is on every page people see.
 //
 // Like the election page (election.ts), a browser opening /i/markets gets it
 // inside the client with its side bars (tidy.ts frames /i/markets/embed in the
@@ -13,7 +13,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Viewer } from "./auth";
-import { PUBLIC_ORIGIN } from "./config";
+import { getViewer, startSession, sessionCookies, clearedCookies } from "./auth";
+import { BSE_HOST, BSE_NAME, BSE_SHORT, PUBLIC_ORIGIN, bseOrigin, isBseHost, isOwnOrigin, requestOrigin } from "./config";
+import { recordSignIn } from "./login-history";
+import { html as loginHtml, layout as loginLayout } from "./login";
+import { passwordStep } from "./password-sign-in";
+import { answerChallenge } from "./two-factor";
 import { sql } from "./db";
 import { hateIn } from "./hate";
 import { avatarSrc } from "./model";
@@ -135,7 +140,7 @@ async function redrawIndex() {
 async function listedWithHistory(db: typeof sql, id: string, price: number, name: string, ticker: string) {
 	const walk = await seedHistory(db, id, price);
 	await db`update market_companies set prev_close = ${walk[0]}, fair = ${price}, volume = floor(shares * (0.004 + random() * 0.008))::bigint where id = ${id}`;
-	await db`insert into market_headlines (text, cat, ticker) values (${`${name} (${ticker}) lists on TradeX at ${fmt(price)}`}, 'Corporate', ${ticker})`;
+	await db`insert into market_headlines (text, cat, ticker) values (${`${name} (${ticker}) lists on the BSE at ${fmt(price)}`}, 'Corporate', ${ticker})`;
 	setTimeout(() => redrawIndex().then(() => changed++).catch(() => {}), 500);
 }
 // flat charts get their past first, then the clock starts
@@ -557,36 +562,53 @@ function describeCompany(c: Company) {
 	return `${c.name} (${c.ticker}) ${fmtP(c.price)} ${sg(pct(c.price, c.prevClose))} · market cap ${big(c.price * c.shares)} · volume ${c.volume.toLocaleString("en-US")}${c.sector ? ` · ${c.sector}` : ""}${c.owner ? ` · founded by @${c.owner.handle}` : ""}${c.suspended ? " · SUSPENDED" : ""}`;
 }
 
-async function page(req: Request, viewer: Viewer | undefined): Promise<Response> {
+async function page(req: Request, viewer: Viewer | undefined, opts: { standalone?: boolean; ticker?: string | null; view?: string | null } = {}): Promise<Response> {
 	const url = new URL(req.url);
 	const st = await state(viewer);
-	const co = companyBy(st, url.searchParams.get("c"));
-	const name = settings().instance_name;
-	const title = co ? `${co.ticker} · ${co.name}` : "Markets";
+	const standalone = opts.standalone ?? isBseHost(req);
+	const ticker = opts.ticker ?? url.searchParams.get("c");
+	const co = companyBy(st, ticker);
+	const inst = settings().instance_name;
+	const title = co ? `${co.ticker} · ${co.name}` : standalone ? BSE_NAME : "BSE";
 	const desc = co ? describeCompany(co) : describeMarket(st);
 	const v = Math.floor(Date.now() / 60000).toString(36);
-	const image = `${PUBLIC_ORIGIN}${MARKETS_PATH}/og.png?${co ? `c=${encodeURIComponent(co.ticker)}&` : ""}v=${v}`;
-	const canonical = `${PUBLIC_ORIGIN}${MARKETS_PATH}${co ? `?c=${encodeURIComponent(co.ticker)}` : ""}`;
+	const origin = standalone ? (isBseHost(req) ? requestOrigin(req) : bseOrigin()) : PUBLIC_ORIGIN;
+	const path = standalone ? (co ? `/c/${co.ticker}` : "/") : `${MARKETS_PATH}${co ? `?c=${encodeURIComponent(co.ticker)}` : ""}`;
+	const image = `${origin}${MARKETS_PATH}/og.png?${co ? `c=${encodeURIComponent(co.ticker)}&` : ""}v=${v}`;
+	const canonical = `${origin}${path}`;
+	const siteName = standalone ? BSE_NAME : inst;
+	const ogTitle = co ? `${BSE_SHORT} · ${co.ticker} · ${co.name}` : BSE_NAME;
 	const head = [
-		["property", "og:title", `TradeX · ${title}`],
+		["property", "og:title", ogTitle],
 		["property", "og:description", desc],
 		["property", "og:type", "website"],
 		["property", "og:url", canonical],
-		["property", "og:site_name", name],
+		["property", "og:site_name", siteName],
 		["property", "og:image", image],
 		["property", "og:image:width", "1200"],
 		["property", "og:image:height", "630"],
 		["name", "twitter:card", "summary_large_image"],
-		["name", "twitter:title", `TradeX · ${title}`],
+		["name", "twitter:title", ogTitle],
 		["name", "twitter:description", desc],
 		["name", "twitter:image", image],
 		["name", "description", desc],
 	].map(([a, k, c]) => `<meta ${a}="${k}" content="${esc(c)}">`).join("\n");
 	const f = clientFiles();
-	const boot = JSON.stringify({ state: st, csrf: viewer?.csrf ?? null, signedIn: !!viewer, coin: MONEY_ICON }).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+	const boot = JSON.stringify({
+		state: st,
+		csrf: viewer?.csrf ?? null,
+		signedIn: !!viewer,
+		coin: MONEY_ICON,
+		site: standalone ? "bse" : "app",
+		home: PUBLIC_ORIGIN,
+		bse: bseOrigin(),
+		name: BSE_NAME,
+		short: BSE_SHORT,
+	}).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+	const docTitle = co ? `${co.ticker} · ${co.name} · ${BSE_SHORT}` : standalone ? BSE_NAME : `${BSE_SHORT} · ${inst}`;
 	const html = `<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>${esc(title)} · ${esc(name)}</title>
+<html lang="en"${standalone ? ' data-site="bse"' : ""}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>${esc(docTitle)}</title>
 <link rel="canonical" href="${esc(canonical)}">
 ${head}
 <meta name="theme-color" content="#000000">
@@ -643,7 +665,7 @@ function checkArt(verifiedType: string | null | undefined): Promise<string | nul
 }
 // DejaVu Sans Bold's capitals, near enough to set the checkmark after a ticker
 const capWidth = (t: string, size: number) => [...t].reduce((w, ch) => w + (/[IJ]/.test(ch) ? 0.4 : /[MW]/.test(ch) ? 1.02 : 0.78), 0) * size;
-function ogSvg(s: Shared, c: Company | undefined, pic: string | null = null, check: string | null = null): string {
+function ogSvg(s: Shared, c: Company | undefined, pic: string | null = null, check: string | null = null, origin: string = PUBLIC_ORIGIN): string {
 	const FONT = "DejaVu Sans, Helvetica, Arial, sans-serif";
 	const all = s.companies;
 	const mc = all.reduce((t, x) => t + x.price * x.shares, 0), base = all.reduce((t, x) => t + x.prevClose * x.shares, 0);
@@ -675,23 +697,32 @@ function ogSvg(s: Shared, c: Company | undefined, pic: string | null = null, che
 	const pill = all.length ? `<rect x="56" y="${c ? 244 : 232}" width="170" height="44" rx="22" fill="${up ? "#1d3a2a" : "#3a1d1d"}"/><text x="141" y="${c ? 275 : 263}" font-size="24" font-weight="700" text-anchor="middle" fill="${up ? "#4ade80" : "#f87171"}">${up ? "▲" : "▼"} ${Math.abs(change).toFixed(2)}%</text>` : "";
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="${FONT}">
 <rect width="1200" height="630" fill="#000"/>
-<text x="56" y="70" font-size="26" font-weight="800" letter-spacing="4" fill="#e7e9ea">TRADEX</text>
-<text x="1144" y="70" font-size="22" fill="#71767b" text-anchor="end">${esc(settings().instance_name)} Markets · Money</text>
+<text x="56" y="70" font-size="26" font-weight="800" letter-spacing="4" fill="#e7e9ea">BSE</text>
+<text x="1144" y="70" font-size="22" fill="#71767b" text-anchor="end">${esc(BSE_NAME)}</text>
 ${face}<text x="${tx}" y="${c ? 128 : 132}" font-size="34" font-weight="700" fill="#e7e9ea">${head}</text>
 <text x="${tx}" y="${c ? 166 : 168}" font-size="24" fill="#71767b">${sub}</text>
 <text x="56" y="${c ? 232 : 222}" font-size="52" font-weight="800" fill="#ffffff">${value}</text>
 ${pill}${chart}
-<text x="1144" y="610" font-size="20" fill="#71767b" text-anchor="end">${esc(OWN_HOST)}${MARKETS_PATH}${c ? `?c=${esc(c.ticker)}` : ""}</text>
+<text x="1144" y="610" font-size="20" fill="#71767b" text-anchor="end">${esc(ogFoot(c?.ticker ?? null, origin))}</text>
 </svg>`;
 }
 const pictures = new Map<string, Promise<Buffer>>();
-async function ogImage(ticker: string | null): Promise<Buffer> {
+function ogFoot(ticker: string | null, origin: string): string {
+	try {
+		const host = new URL(origin).host;
+		if (host === BSE_HOST || host.startsWith("trade.") || host.startsWith("bse.")) return ticker ? `${host}/c/${ticker}` : host;
+		return `${host}${MARKETS_PATH}${ticker ? `?c=${ticker}` : ""}`;
+	} catch {
+		return OWN_HOST;
+	}
+}
+async function ogImage(ticker: string | null, origin: string = PUBLIC_ORIGIN): Promise<Buffer> {
 	const s = await shared();
 	const c = companyBy(s, ticker);
-	const key = `${c?.ticker ?? ""}:${Math.floor(Date.now() / 60000)}`;
+	const key = `${c?.ticker ?? ""}:${origin}:${Math.floor(Date.now() / 60000)}`;
 	let p = pictures.get(key);
 	if (!p) {
-		p = Promise.all([ogPicture(c), checkArt(c?.owner?.badge)]).then(([pic, check]) => png(ogSvg(s, c, pic, check)));
+		p = Promise.all([ogPicture(c), checkArt(c?.owner?.badge)]).then(([pic, check]) => png(ogSvg(s, c, pic, check, origin)));
 		pictures.set(key, p);
 		p.catch(() => pictures.delete(key));
 		if (pictures.size > 30) pictures.delete(pictures.keys().next().value!);
@@ -732,7 +763,7 @@ function smoothPath(pts: [number, number][]): string {
 	return d;
 }
 const RANGES: Record<string, [number, string]> = { "30": [30, "1M"], "90": [90, "3M"], "200": [200, "All"] };
-function exportSvg(c: Company, range: number, label: string, pic: string | null, check: string | null): string {
+function exportSvg(c: Company, range: number, label: string, pic: string | null, check: string | null, origin: string = PUBLIC_ORIGIN): string {
 	const FONT = "DejaVu Sans, Helvetica, Arial, sans-serif";
 	const W = 1200, H = 675, S = 2;
 	const hist = c.hist.slice(-range).map((h) => h[1]);
@@ -778,8 +809,8 @@ function exportSvg(c: Company, range: number, label: string, pic: string | null,
 	const sy = cy + ch + 22, colW = (W - 96) / 4;
 	const row = `<rect x="48" y="${sy}" width="${W - 96}" height="76" rx="16" fill="#0e1012" stroke="#1f2327"/>`
 		+ stats.map(([k, v], i) => `<text x="${72 + i * colW}" y="${sy + 30}" font-size="16" fill="#71767b">${esc(k)}</text><text x="${72 + i * colW}" y="${sy + 58}" font-size="22" font-weight="700" fill="#e7e9ea">${esc(fitText(v, 22, colW - 30))}</text>`).join("");
-	const foot = `<text x="48" y="${H - 22}" font-size="17" font-weight="700" fill="#8b98a5">${esc(settings().instance_name)} Markets</text>`
-		+ `<text x="${W - 48}" y="${H - 22}" font-size="17" fill="#71767b" text-anchor="end">${esc(OWN_HOST)}</text>`;
+	const foot = `<text x="48" y="${H - 22}" font-size="17" font-weight="700" fill="#8b98a5">${esc(BSE_NAME)}</text>`
+		+ `<text x="${W - 48}" y="${H - 22}" font-size="17" fill="#71767b" text-anchor="end">${esc(new URL(origin).host)}</text>`;
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="${W * S}" height="${H * S}" viewBox="0 0 ${W} ${H}" font-family="${FONT}">
 <rect width="${W}" height="${H}" fill="#000"/>
 ${face}<text x="${tx}" y="${ay + 36}" font-size="34" font-weight="700" fill="#e7e9ea">${esc(name)}</text>${mark}
@@ -798,15 +829,15 @@ async function exportPicture(c: Company): Promise<string | null> {
 	}
 }
 const exports_ = new Map<string, Promise<Buffer>>();
-async function exportImage(ticker: string | null, r: string | null): Promise<Buffer | null> {
+async function exportImage(ticker: string | null, r: string | null, origin: string = PUBLIC_ORIGIN): Promise<Buffer | null> {
 	const s = await shared();
 	const c = companyBy(s, ticker);
 	if (!c) return null;
 	const [range, label] = RANGES[r ?? ""] ?? RANGES["90"];
-	const key = `${c.ticker}:${range}:${Math.floor(Date.now() / 15000)}`;
+	const key = `${c.ticker}:${range}:${origin}:${Math.floor(Date.now() / 15000)}`;
 	let p = exports_.get(key);
 	if (!p) {
-		p = Promise.all([exportPicture(c), checkArt(c.owner?.badge)]).then(([pic, check]) => png(exportSvg(c, range, label, pic, check)));
+		p = Promise.all([exportPicture(c), checkArt(c.owner?.badge)]).then(([pic, check]) => png(exportSvg(c, range, label, pic, check, origin)));
 		exports_.set(key, p);
 		p.catch(() => exports_.delete(key));
 		if (exports_.size > 20) exports_.delete(exports_.keys().next().value!);
@@ -816,25 +847,39 @@ async function exportImage(ticker: string | null, r: string | null): Promise<Buf
 
 // ---------- a link to the market in a post: its card (posts.ts) ----------
 
+function bseTickerPath(pathname: string): string | null {
+	const m = /^\/c\/([A-Za-z]{2,5})(?:\/edit)?\/?$/.exec(pathname);
+	return m ? m[1].toUpperCase() : null;
+}
+function isBsePublicHost(host: string): boolean {
+	const h = host.split(":")[0].toLowerCase();
+	return h === BSE_HOST || h === "trade.localhost" || h === "bse.localhost";
+}
 export function isMarketLink(url: string): boolean {
 	try {
 		const u = new URL(url);
-		return u.host === OWN_HOST && (u.pathname === MARKETS_PATH || u.pathname === `${MARKETS_PATH}/`);
+		if (u.host === OWN_HOST && (u.pathname === MARKETS_PATH || u.pathname === `${MARKETS_PATH}/`)) return true;
+		if (isBsePublicHost(u.host) && (u.pathname === "/" || u.pathname === "" || bseTickerPath(u.pathname) || u.pathname === "/markets")) return true;
+		return false;
 	} catch {
 		return false;
 	}
 }
 export async function marketLinkCard(url: string): Promise<Record<string, unknown>> {
 	const s = await shared();
-	const c = companyBy(s, new URL(url).searchParams.get("c"));
+	const u = new URL(url);
+	const ticker = u.searchParams.get("c") || bseTickerPath(u.pathname);
+	const c = companyBy(s, ticker);
 	const v = Math.floor(Date.now() / 60000).toString(36);
+	const standalone = isBsePublicHost(u.host);
+	const origin = standalone ? `${u.protocol}//${u.host}` : PUBLIC_ORIGIN;
 	const str = (x: string) => ({ string_value: x, type: "STRING" });
-	const img = { image_value: { url: `${PUBLIC_ORIGIN}${MARKETS_PATH}/og.png?${c ? `c=${encodeURIComponent(c.ticker)}&` : ""}v=${v}`, width: 1200, height: 630, alt: c ? `${c.ticker} price chart` : "Market cap chart" }, type: "IMAGE" };
+	const img = { image_value: { url: `${origin}${MARKETS_PATH}/og.png?${c ? `c=${encodeURIComponent(c.ticker)}&` : ""}v=${v}`, width: 1200, height: 630, alt: c ? `${c.ticker} price chart` : "Market cap chart" }, type: "IMAGE" };
 	const values: Record<string, unknown> = {
-		title: str(c ? `TradeX · ${c.ticker} · ${c.name}` : "TradeX · Markets"),
+		title: str(c ? `${BSE_SHORT} · ${c.ticker} · ${c.name}` : BSE_NAME),
 		description: str(c ? describeCompany(c) : describeMarket(s)),
-		domain: str(OWN_HOST),
-		vanity_url: { ...str(OWN_HOST), scribe_key: "vanity_url" },
+		domain: str(standalone ? u.host : OWN_HOST),
+		vanity_url: { ...str(standalone ? u.host : OWN_HOST), scribe_key: "vanity_url" },
 		card_url: { ...str(url), scribe_key: "card_url" },
 	};
 	for (const key of ["thumbnail_image", "thumbnail_image_large", "thumbnail_image_original", "summary_photo_image", "summary_photo_image_large", "summary_photo_image_original", "photo_image_full_size", "photo_image_full_size_large", "photo_image_full_size_original"]) values[key] = img;
@@ -852,6 +897,169 @@ export async function marketLinkCard(url: string): Promise<Record<string, unknow
 
 // ---------- routes ----------
 
+
+// ---------- the BSE's own site (trade.bs.xitter.space) ----------
+
+const optsIp = (req: Request) => req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
+// a relative path on the BSE site, or "/" when the value isn't one of ours
+function bseNext(raw: string | null): string {
+	if (!raw) return "/";
+	try {
+		if (raw.startsWith("/") && !raw.startsWith("//") && !raw.includes("\\")) return raw;
+		const u = new URL(raw);
+		if (isBsePublicHost(u.host)) return (u.pathname || "/") + u.search;
+	} catch {}
+	return "/";
+}
+async function issueTicket(userId: string): Promise<string> {
+	const token = Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString("hex");
+	await sql`delete from market_auth_tickets where expires_at < now()`;
+	await sql`insert into market_auth_tickets (token, user_id, expires_at) values (${token}, ${userId}::bigint, now() + interval '2 minutes')`;
+	return token;
+}
+function signedInOn(session: { token: string; csrf: string; userId: string }, location: string, status = 303): Response {
+	const headers = new Headers({ location });
+	for (const c of sessionCookies(session)) headers.append("set-cookie", c);
+	return new Response(null, { status, headers });
+}
+function loginPage(opts: { action: string; next: string; error?: string; challenge?: string; standalone?: boolean }): Response {
+	const inst = settings().instance_name;
+	const next = esc(opts.next);
+	const action = esc(opts.action);
+	const err = opts.error ? `<p class="error" role="alert">${esc(opts.error)}</p>` : "";
+	const body = opts.challenge
+		? `<form method="post" action="${action}">
+	<h1>Enter your code</h1>
+	<p class="alt">Open your authenticator app and enter the code for ${esc(inst)}, or use a backup code.</p>
+	${err}
+	<input type="hidden" name="next" value="${next}">
+	<input type="hidden" name="c" value="${esc(opts.challenge)}">
+	<input name="code" inputmode="numeric" autocomplete="one-time-code" autofocus required aria-label="Code">
+	<button type="submit">Continue</button>
+	<p class="alt"><a href="${action}?next=${encodeURIComponent(opts.next)}">Start again</a></p>
+</form>`
+		: `<form method="post" action="${action}">
+	<h1>Sign in to the ${esc(BSE_SHORT)}</h1>
+	<p class="alt">Use your ${esc(inst)} account. Trading uses the same Money balance.</p>
+	${err}
+	<input type="hidden" name="next" value="${next}">
+	<label>Username<input name="username" autocomplete="username" autofocus required></label>
+	<label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+	<button type="submit">Sign in</button>
+	${opts.standalone ? `<p class="alt"><a href="${esc(PUBLIC_ORIGIN)}${MARKETS_PATH}/connect?next=${encodeURIComponent(bseOrigin() + opts.next)}">Already signed in on ${esc(inst)}? Continue</a></p>` : ""}
+	<p class="alt"><a href="${esc(opts.standalone ? "/" : PUBLIC_ORIGIN + MARKETS_PATH)}">Cancel</a>${opts.standalone ? ` · <a href="${esc(PUBLIC_ORIGIN)}">${esc(inst)}</a>` : ""}</p>
+</form>`;
+	return loginHtml(loginLayout(`Sign in to the ${BSE_SHORT}`, body), opts.error ? 401 : 200);
+}
+async function finishBseLogin(req: Request, session: { token: string; csrf: string; userId: string }, next: string, handoff: boolean): Promise<Response> {
+	await recordSignIn(req, session);
+	if (!handoff) return signedInOn(session, bseNext(next));
+	const ticket = await issueTicket(session.userId);
+	const to = `${bseOrigin()}/auth?ticket=${encodeURIComponent(ticket)}&next=${encodeURIComponent(bseNext(next))}`;
+	return signedInOn(session, to);
+}
+async function loginFromForm(req: Request, next: string, handoff: boolean): Promise<Response> {
+	const f = await req.formData().catch(() => undefined);
+	const get = (k: string) => (typeof f?.get(k) === "string" ? String(f.get(k)) : "");
+	const challenge = get("c"), code = get("code").trim();
+	const action = handoff ? `${MARKETS_PATH}/connect` : "/login";
+	if (challenge) {
+		const answered = await answerChallenge(challenge, code);
+		if (answered.session) return finishBseLogin(req, answered.session, next, handoff);
+		if (answered.unknown) return loginPage({ action, next, error: "That sign-in expired. Try again.", standalone: !handoff });
+		return loginPage({ action, next, error: answered.error ?? "That code isn't right.", challenge, standalone: !handoff });
+	}
+	const step = await passwordStep(get("username"), get("password"));
+	if ("session" in step) return finishBseLogin(req, step.session, next, handoff);
+	if ("challenge" in step) return loginPage({ action, next, challenge: step.challenge, standalone: !handoff });
+	return loginPage({ action, next, error: step.error, standalone: !handoff });
+}
+// on the main site: if the person is already signed in, send them to the BSE with a short-lived ticket; otherwise take their password here
+async function bseConnect(req: Request, viewer: Viewer | undefined): Promise<Response> {
+	const url = new URL(req.url);
+	const next = bseNext(url.searchParams.get("next") || (req.method === "POST" ? undefined : "/"));
+	if (req.method === "POST") {
+		const f = await req.clone().formData().catch(() => undefined);
+		const posted = typeof f?.get("next") === "string" ? bseNext(String(f.get("next"))) : next;
+		const h = hit("auth", optsIp(req));
+		if (!h.ok) return limitedResponse(h);
+		return loginFromForm(req, posted, true);
+	}
+	if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405 });
+	if (viewer) {
+		const ticket = await issueTicket(viewer.id);
+		return Response.redirect(`${bseOrigin()}/auth?ticket=${encodeURIComponent(ticket)}&next=${encodeURIComponent(next)}`, 302);
+	}
+	return loginPage({ action: `${MARKETS_PATH}/connect`, next, standalone: false });
+}
+async function bseLogin(req: Request, viewer: Viewer | undefined): Promise<Response> {
+	const url = new URL(req.url);
+	const next = bseNext(url.searchParams.get("next"));
+	if (req.method === "POST") {
+		const f = await req.clone().formData().catch(() => undefined);
+		const posted = typeof f?.get("next") === "string" ? bseNext(String(f.get("next"))) : next;
+		const h = hit("auth", optsIp(req));
+		if (!h.ok) return limitedResponse(h);
+		return loginFromForm(req, posted, false);
+	}
+	if (viewer) return Response.redirect(next, 302);
+	return loginPage({ action: "/login", next, standalone: true });
+}
+async function bseAuthRedeem(req: Request): Promise<Response> {
+	const url = new URL(req.url);
+	const ticket = url.searchParams.get("ticket") ?? "";
+	const next = bseNext(url.searchParams.get("next"));
+	if (!ticket) return Response.redirect(`/login?next=${encodeURIComponent(next)}`, 302);
+	const [row] = await sql`delete from market_auth_tickets where token = ${ticket} and expires_at > now() returning user_id::text as id`;
+	if (!row) return loginPage({ action: "/login", next, error: "That sign-in link expired. Sign in again.", standalone: true });
+	try {
+		const session = await startSession(row.id);
+		await recordSignIn(req, session);
+		return signedInOn(session, next, 302);
+	} catch {
+		return loginPage({ action: "/login", next, error: "That account can't sign in right now.", standalone: true });
+	}
+}
+function bseLogout(next = "/"): Response {
+	const headers = new Headers({ location: bseNext(next) });
+	for (const c of clearedCookies()) headers.append("set-cookie", c);
+	return new Response(null, { status: 302, headers });
+}
+function mapBsePage(pathname: string, q: URLSearchParams): { view?: string; ticker?: string | null } | null {
+	if (pathname === "/" || pathname === "") return { ticker: q.get("c") };
+	if (pathname === "/markets" || pathname === "/list") return { view: "list" };
+	if (pathname === "/portfolio") return { view: "acct" };
+	if (pathname === "/admin") return { view: "admin" };
+	if (pathname === "/new" || pathname === "/list-company") return { view: "new" };
+	const tk = bseTickerPath(pathname);
+	if (tk) return { ticker: tk, view: /\/edit\/?$/.test(pathname) ? "edit" : "co" };
+	return null;
+}
+const BSE_PASS = [/^\/abs\//, /^\/public\//, /^\/profile_images\//, /^\/media\//, /^\/i\/xitter\//, /^\/favicon\.ico$/, /^\/healthz$/, /^\/sw\.js$/];
+// the BSE's own host: pretty paths, its own layout, and a way to sign in with a Bloxburg Social account
+export async function bseSite(req: Request, opts: { ip: string }): Promise<Response | undefined> {
+	if (!isBseHost(req)) return;
+	const url = new URL(req.url);
+	const p = url.pathname;
+	if (BSE_PASS.some((r) => r.test(p))) return;
+	const viewer = await getViewer(req);
+	if (p === "/login") return bseLogin(req, viewer);
+	if (p === "/auth") return bseAuthRedeem(req);
+	if (p === "/logout") return bseLogout(url.searchParams.get("next") ?? "/");
+	if (p === MARKETS_PATH || p.startsWith(`${MARKETS_PATH}/`)) {
+		return marketsRoute(req, p, viewer, { clientShell: false, ip: opts.ip });
+	}
+	const mapped = mapBsePage(p, url.searchParams);
+	if (!mapped) {
+		if (req.method === "GET" && (req.headers.get("sec-fetch-dest") === "document" || req.headers.get("accept")?.includes("text/html"))) {
+			return Response.redirect(PUBLIC_ORIGIN + p + url.search, 302);
+		}
+		return new Response("not found", { status: 404 });
+	}
+	if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405 });
+	return page(req, viewer, { standalone: true, ticker: mapped.ticker, view: mapped.view });
+}
+
 export async function marketsRoute(req: Request, p: string, viewer: Viewer | undefined, opts: { clientShell: boolean; ip: string }): Promise<Response | undefined> {
 	if (p !== MARKETS_PATH && !p.startsWith(`${MARKETS_PATH}/`)) return;
 	const url = new URL(req.url);
@@ -861,16 +1069,19 @@ export async function marketsRoute(req: Request, p: string, viewer: Viewer | und
 		if (top && opts.clientShell) return undefined;
 		return page(req, viewer);
 	}
+	if (p === `${MARKETS_PATH}/connect` || p === `${MARKETS_PATH}/connect/`) return bseConnect(req, viewer);
 	if (p === `${MARKETS_PATH}/export.png`) {
 		const h = hit("read", viewer ? `user:${viewer.id}` : `guest:${opts.ip}`);
 		if (!h.ok) return limitedResponse(h);
-		const body = await exportImage(url.searchParams.get("c"), url.searchParams.get("r"));
+		const origin = isBseHost(req) ? requestOrigin(req) : PUBLIC_ORIGIN;
+		const body = await exportImage(url.searchParams.get("c"), url.searchParams.get("r"), origin);
 		if (!body) return new Response("not found", { status: 404 });
 		const t = (companyBy(await shared(), url.searchParams.get("c"))?.ticker ?? "stock").replace(/[^A-Za-z0-9_-]/g, "");
 		return new Response(body, { headers: { "content-type": "image/png", "content-disposition": `attachment; filename="${t}-stock.png"`, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 	}
 	if (p === `${MARKETS_PATH}/og.png`) {
-		const body = await ogImage(url.searchParams.get("c"));
+		const origin = isBseHost(req) ? requestOrigin(req) : PUBLIC_ORIGIN;
+		const body = await ogImage(url.searchParams.get("c"), origin);
 		return new Response(body, { headers: { "content-type": "image/png", "cache-control": url.searchParams.has("v") ? "public, max-age=300" : "public, max-age=30" } });
 	}
 	const logo = /^\/i\/markets\/logo\/(\d{1,19})$/.exec(p);
@@ -887,7 +1098,7 @@ export async function marketsRoute(req: Request, p: string, viewer: Viewer | und
 	if (req.method !== "POST" && !(what === "admin" && req.method === "GET")) return fail("not found", 404);
 	if (!viewer) return fail("Sign in to trade", 401);
 	// writes come from this site's own page, with the session's token
-	if (req.method === "POST" && (req.headers.get("origin") !== PUBLIC_ORIGIN || req.headers.get("x-csrf-token") !== viewer.csrf)) return fail("Reload the page and try again", 403);
+	if (req.method === "POST" && (!isOwnOrigin(req.headers.get("origin")) || req.headers.get("x-csrf-token") !== viewer.csrf)) return fail("Reload the page and try again", 403);
 	try {
 		const body = req.method === "POST" ? ((await req.json().catch(() => null)) ?? {}) : {};
 		if (what === "trade") {

@@ -77,7 +77,7 @@ export function patchElectionRoute(text: string): string {
 	const m = BOOKMARKS_ROUTE.exec(text);
 	if (!m) return text;
 	const [whole, jsx, router, component] = m;
-	// and TradeX (markets.ts) the same way
+	// and the BSE (markets.ts) the same way
 	const add = ["/i/electionnov22", "/i/markets"].filter((p) => !text.includes(`"${p}"`));
 	if (!add.length) return text;
 	return text.replace(whole, `${add.map((p) => `(0,${jsx}.jsx)(${router}.Route,{component:${component},exact:!0,path:"${p}"},"${p}")`).join(",")},${whole}`);

@@ -3,7 +3,7 @@ import { multiViewer } from "./accounts";
 import { gbeePage } from "./gbee-page";
 import { CLIENT_DIR, clientDir, clientPathAllowed, getClientFile, getClientFilePath, hasClientFile, withClientDir } from "./client-cache";
 import { CLIENT_COOKIE, chosenClient, clientCookie, clientRoute, requestClient, switchByQuery } from "./client-choice";
-import { PORT, PUBLIC_ORIGIN } from "./config";
+import { PORT, PUBLIC_ORIGIN, isBseHost, isOwnOrigin } from "./config";
 import { migrate, sql } from "./db";
 import { knownOperation, runOperation } from "./graphql";
 import { brandingFile } from "./branding";
@@ -95,7 +95,7 @@ import { expireShopCheckmarks } from "./money-shop";
 import { restrictedPage, restrictedRefuses } from "./restricted-page";
 import { VERIFIED_ART } from "./verified-art";
 import { electionRoute } from "./election";
-import { marketsRoute } from "./markets";
+import { bseSite, marketsRoute } from "./markets";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -490,8 +490,13 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (req.method !== "GET" && req.method !== "HEAD" && req.headers.has("cookie")) {
 		const site = req.headers.get("sec-fetch-site");
 		const origin = req.headers.get("origin");
-		if (site ? site !== "same-origin" && site !== "none" : origin && origin !== PUBLIC_ORIGIN && origin !== url.origin)
+		if (site ? site !== "same-origin" && site !== "none" : origin && origin !== PUBLIC_ORIGIN && origin !== url.origin && !isOwnOrigin(origin))
 			return new Response("This request came from another site.", { status: 403 });
+	}
+	// the BSE's own host: its pages, sign-in and /i/markets, but not the social site
+	if (isBseHost(req)) {
+		const bse = await bseSite(req, { ip: requestIp(req) ?? "unknown" });
+		if (bse) return bse;
 	}
 	if (p.startsWith("/abs/")) return serveClient(req, p);
 	if (p === "/.well-known/xitter" || p.startsWith("/federation/v1/")) {
@@ -605,7 +610,7 @@ async function route(req: Request): Promise<Response | undefined> {
 		return Response.redirect("/account/suspended", 302);
 	}
 	if (p === "/account/suspended" && req.method === "GET") return Response.redirect("/home", 302);
-	// TradeX, the play stock market (markets.ts), framed in the client like the election page
+	// BSE, the Bloxburg Stock Exchange (markets.ts), framed in the client like the election page
 	{
 		const markets = await marketsRoute(req, p, viewer, { clientShell: !loadBuild()?.build.stateBase && (!!viewer || settings().operations.guest_reading), ip: requestIp(req) ?? "unknown" });
 		if (markets) return markets;

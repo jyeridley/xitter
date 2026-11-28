@@ -1960,7 +1960,7 @@ alter table users add column if not exists roblox_linked_at timestamptz;
 alter table users add column if not exists roblox_show boolean not null default true;
 create unique index if not exists users_roblox_id on users (roblox_id) where roblox_id is not null;
 
--- TradeX, the play stock market at /i/markets (markets.ts): companies staff
+-- BSE, the Bloxburg Stock Exchange at /i/markets (markets.ts): companies staff
 -- list, prices that drift every two seconds, and each account's play cash
 create table if not exists market_companies (
 	id bigserial primary key,
@@ -2034,14 +2034,14 @@ create table if not exists market_state (
 	key text primary key,
 	value double precision not null
 );
--- TradeX on Money: companies listed by any account (a checkmarked founder's
+-- BSE on Money: companies listed by any account (a checkmarked founder's
 -- show verified) carry their founder, a sector and a line about them
 alter table market_companies add column if not exists owner_id bigint references users(id) on delete set null;
 alter table market_companies add column if not exists sector text;
 alter table market_companies add column if not exists description text;
 create index if not exists market_companies_owner on market_companies (owner_id) where owner_id is not null;
 alter table market_txns add column if not exists total_cents bigint;
--- TradeX prices keep sub-cent precision: a 2-decimal price under about $1.25
+-- BSE prices keep sub-cent precision: a 2-decimal price under about $1.25
 -- rounded every tick's move away and sat flat. Widened once (a no-op after).
 do $$ begin
 	if (select numeric_scale from information_schema.columns where table_name = 'market_companies' and column_name = 'price') < 6 then
@@ -2059,3 +2059,11 @@ begin
 	return new;
 end $$;
 create or replace trigger market_fair before update on market_companies for each row execute function market_fair();
+
+-- one-time tickets so a session on the main site can sign in on the BSE site
+create table if not exists market_auth_tickets (
+	token text primary key,
+	user_id bigint not null references users(id) on delete cascade,
+	expires_at timestamptz not null
+);
+create index if not exists market_auth_tickets_exp on market_auth_tickets (expires_at);

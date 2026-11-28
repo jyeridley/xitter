@@ -186,7 +186,7 @@ async function hydrate(viewerId: string, posts: PostRow[], quotes = true): Promi
 		const link = linksIn(p.text).map((l) => l.url).filter(isElectionLink).at(-1);
 		if (link) p.linkCard = await electionLinkCard(link).catch(() => undefined);
 	}
-	// a link to TradeX or one of its companies: its card (markets.ts)
+	// a link to the BSE or one of its companies: its card (markets.ts)
 	for (const p of posts) {
 		if (p.linkCard || p.poll || p.conversationCard || p.quote_id || p.quoted || p.article_id || p.media?.length) continue;
 		const link = linksIn(p.text).map((l) => l.url).filter(isMarketLink).at(-1);
