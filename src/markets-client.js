@@ -572,7 +572,7 @@ function spark(c){var h=c.hist.slice(-30);if(h.length<2)return '<span class=spar
 function item(c,right){return '<div class=item data-go="co" data-id="'+c.id+'">'+logo(c)+'<div class=who>'+nm(c,'t1')+'<div class=t2>'+esc(c.ticker)+(c.sector?' · '+esc(c.sector):'')+(c.suspended?' · Suspended':'')+'</div></div>'+spark(c)+'<div class=px>'+(right||('<div class="t1 num">'+fp(c.price)+'</div>'+pill(chg(c))))+'</div></div>'}
 var SHIELD='<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="M12 8v4.5M12 16h.01"/></svg>';
 function verified(c){return !!(c&&c.verified)}
-function unvText(){return 'Companies without a checkmark aren\'t officially verified by '+esc(db.instance||'us')+'.'}
+function unvText(){return 'Companies without a checkmark aren\'t officially verified by the exchange.'}
 function unvBanner(){return '<div class=unv role=note>'+SHIELD+'<div><b>Unverified company</b><span>'+unvText()+' Do your own research before trading.</span></div></div>'}
 function checkNote(){return '<div class=cknote>'+SHIELD+'<span>A gold checkmark next to a company means the exchange has verified it. '+unvText()+(SITE!=='bse'&&B.bse?' <a href="'+esc(B.bse)+'">Open the BSE site</a>':'')+'</span></div>'}
 function listCta(){
