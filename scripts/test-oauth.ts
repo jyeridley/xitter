@@ -47,6 +47,8 @@ try {
 	assert(!validRedirect("http://example.org/callback"), "plain HTTP remote redirect rejected");
 	assert(!validRedirect("https://example.org/callback#fragment"), "fragment rejected");
 	assert(validRedirect("http://127.0.0.1:3210/callback"), "loopback redirect allowed");
+	assert(validRedirect("http://trade.localhost:3001/auth/callback"), "*.localhost loopback redirect allowed");
+	assert(validRedirect("http://[::1]/callback"), "IPv6 loopback redirect allowed");
 	assert.equal((await developerAppsRoute(postForm("/account/apps/developer", { csrf: "wrong", action: "register", name: "Bad", redirect_uri: redirect }), appOwner)).status, 403, "registration needs CSRF");
 	const registered = await developerAppsRoute(postForm("/account/apps/developer", { csrf: appOwner.csrf, action: "register", name: "Example app", redirect_uri: redirect }), appOwner);
 	assert.equal(registered.status, 200);

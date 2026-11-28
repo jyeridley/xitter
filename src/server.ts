@@ -68,7 +68,7 @@ import { instancesRoute } from "./federation-settings";
 import { importRoute, resumeImports } from "./archive-import";
 import { stickerImage, stickerPacks } from "./stickers";
 import { apiTokensRoute, publicApi } from "./public-api";
-import { connectedAppsRoute, developerAppsRoute, oauthAppIcon, oauthAuthorize, oauthToken } from "./oauth";
+import { connectedAppsRoute, developerAppsRoute, ensureBseOAuthClient, oauthAppIcon, oauthAuthorize, oauthToken } from "./oauth";
 import { authorizationServerMetadata } from "./oauth-metadata";
 import { apiDocsPage } from "./api-docs";
 import { hashflagAsset, hashflagsJson } from "./hashflags";
@@ -382,6 +382,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 }
 
 await migrate();
+await ensureBseOAuthClient();
 await expireSanctions();
 setInterval(
 	() =>

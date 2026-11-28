@@ -5,7 +5,7 @@ import type { Viewer } from "./auth";
 import { otherAccounts, signInCookies, switchCookies } from "./accounts";
 import { accountPage, esc } from "./account-page";
 import { boundedBody } from "./api-input";
-import { PUBLIC_ORIGIN } from "./config";
+import { BSE_OAUTH_CLIENT_ID, BSE_OAUTH_NAME, PUBLIC_ORIGIN, bseOrigin } from "./config";
 import { sql } from "./db";
 import { isId, newId } from "./ids";
 import { sniffImage } from "./media";
@@ -29,7 +29,9 @@ export function validRedirect(value: string): boolean {
 	try {
 		const url = new URL(value);
 		if (url.hash || url.username || url.password || url.origin === "null") return false;
-		return url.protocol === "https:" || (url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname));
+		const host = url.hostname;
+		const loopback = host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1" || host === "::1";
+		return url.protocol === "https:" || (url.protocol === "http:" && loopback);
 	} catch { return false; }
 }
 
@@ -89,7 +91,7 @@ export async function oauthToken(req: Request): Promise<Response> {
 
 // clientId is the client_id as the app sent it; dbId is its oauth_clients row,
 // which a metadata-document app only gets once someone approves it
-type RequestData = { clientId: string; dbId?: string; redirect: string; state: string; scope: "read" | "write"; challenge: string; name: string; owner: string | null; icon: string | null };
+type RequestData = { clientId: string; dbId?: string; redirect: string; state: string; scope: "read" | "write"; challenge: string; name: string; owner: string | null; icon: string | null; firstParty?: boolean };
 
 async function authorization(values: URLSearchParams | FormData): Promise<RequestData | undefined> {
 	const get = (key: string) => String(values.get(key) ?? "");
@@ -104,10 +106,13 @@ async function authorization(values: URLSearchParams | FormData): Promise<Reques
 		if (row?.revoked) return undefined;
 		return { clientId, dbId: row?.id, redirect, state, scope: scope as "read" | "write", challenge, name: doc.name, owner: null, icon: doc.logo };
 	}
-	const [client] = await sql`select c.name, c.redirect_uri, c.icon_at, u.screen_name as owner from oauth_clients c join users u on u.id = c.owner_id
-		where c.id = ${clientId}::bigint and not c.revoked and u.status = 'active'`;
-	if (!client || client.redirect_uri !== redirect) return undefined;
-	return { clientId, dbId: clientId, redirect, state, scope: scope as "read" | "write", challenge, name: client.name, owner: client.owner, icon: client.icon_at ? iconUrl(clientId, client.icon_at) : null };
+	const [client] = await sql`select c.name, c.redirect_uri, c.redirect_uris, c.first_party, c.icon_at, u.screen_name as owner
+		from oauth_clients c left join users u on u.id = c.owner_id
+		where c.id = ${clientId}::bigint and not c.revoked and (c.owner_id is null or u.status = 'active')`;
+	if (!client) return undefined;
+	const allowed = [client.redirect_uri, ...(client.redirect_uris ?? [])];
+	if (!allowed.includes(redirect)) return undefined;
+	return { clientId, dbId: clientId, redirect, state, scope: scope as "read" | "write", challenge, name: client.name, owner: client.owner, icon: client.icon_at ? iconUrl(clientId, client.icon_at) : null, firstParty: !!client.first_party };
 }
 
 const redirectWith = (request: RequestData, params: Record<string, string>) => {
@@ -183,6 +188,70 @@ ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ""}<form method="p
 <p class="fine">New here, or forgot your password? Go to <a href="/">${esc(name)}</a>, then reopen this link from ${esc(request.name)}.</p>` });
 }
 
+
+async function hasCurrentGrant(userId: string, clientId: string | undefined, scope: "read" | "write"): Promise<boolean> {
+	if (!isId(clientId)) return false;
+	const [row] = await sql`select scope from api_tokens where user_id = ${userId}::bigint and client_id = ${clientId}::bigint
+		and (expires_at is null or expires_at > now())`;
+	return !!row && (row.scope === "write" || scope === "read");
+}
+
+async function issueAuthorizationCode(request: RequestData, viewer: Viewer): Promise<Response> {
+	const fresh = code();
+	await sql.begin(async (tx) => {
+		const [account] = await tx`select id from users where id = ${viewer.id}::bigint and status = 'active' and deactivated_at is null and instance is null for update`;
+		if (!account) throw new Error("Account cannot authorize apps.");
+		await tx`delete from oauth_codes where expires_at < now()`;
+		let clientId = request.dbId;
+		if (!isId(request.clientId)) {
+			const [row] = await tx`insert into oauth_clients(id, owner_id, name, redirect_uri, metadata_url, logo_uri) values(${newId()}::bigint, null, ${request.name}, ${request.redirect}, ${request.clientId}, ${request.icon})
+				on conflict (metadata_url) do update set name = excluded.name, redirect_uri = excluded.redirect_uri, logo_uri = excluded.logo_uri returning id::text, revoked`;
+			if (row.revoked) throw new Error("This app has been revoked.");
+			clientId = row.id;
+		}
+		await tx`insert into oauth_codes(code_hash, client_id, user_id, redirect_uri, scope, code_challenge, expires_at)
+			values(${digest(fresh)}, ${clientId}::bigint, ${viewer.id}::bigint, ${request.redirect}, ${request.scope}, ${request.challenge}, now() + interval '5 minutes')`;
+	});
+	return redirectWith(request, { code: fresh });
+}
+
+// the BSE site's public PKCE client: no secret, the production redirect and local loopback
+export async function ensureBseOAuthClient() {
+	const redirects = [
+		`https://trade.xitter.space/auth/callback`,
+		`http://trade.localhost:3000/auth/callback`,
+		`http://trade.localhost:3001/auth/callback`,
+		`http://127.0.0.1:3000/auth/callback`,
+		`http://127.0.0.1:3001/auth/callback`,
+	];
+	const local = `${bseOrigin()}/auth/callback`;
+	if (validRedirect(local) && !redirects.includes(local)) redirects.push(local);
+	await sql`insert into oauth_clients (id, owner_id, name, redirect_uri, redirect_uris, first_party)
+		values (${BSE_OAUTH_CLIENT_ID}::bigint, null, ${BSE_OAUTH_NAME}, ${redirects[0]}, ${redirects}, true)
+		on conflict (id) do update set
+			name = excluded.name,
+			redirect_uri = excluded.redirect_uri,
+			redirect_uris = excluded.redirect_uris,
+			first_party = true,
+			revoked = case when oauth_clients.blocked_at is not null then true else false end`;
+}
+
+
+// BSE redeems the authorization code in-process so the site does not have to
+// hairpin through the public origin to reach /oauth/token.
+export async function redeemBseAuthorizationCode(req: Request, redirect: string, code: string, verifier: string): Promise<string | undefined> {
+	const tokenRes = await oauthToken(new Request(`${PUBLIC_ORIGIN}/oauth/token`, {
+		method: "POST",
+		headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for") || "unknown" },
+		body: new URLSearchParams({ grant_type: "authorization_code", client_id: BSE_OAUTH_CLIENT_ID, redirect_uri: redirect, code, code_verifier: verifier }),
+	}));
+	const token = (await tokenRes.json().catch(() => null)) as { access_token?: string } | null;
+	if (!tokenRes.ok || !token?.access_token) return undefined;
+	const [row] = await sql`select user_id::text from api_tokens where token_hash = ${digest(token.access_token)}
+		and client_id = ${BSE_OAUTH_CLIENT_ID}::bigint and (expires_at is null or expires_at > now())`;
+	return row?.user_id;
+}
+
 export async function oauthAuthorize(req: Request, url: URL, viewer: Viewer | undefined): Promise<Response> {
 	if (!viewer) return signInFirst(req, url);
 	if (viewer.status !== "active") return new Response("This account cannot authorize apps.", { status: 403 });
@@ -205,23 +274,10 @@ export async function oauthAuthorize(req: Request, url: URL, viewer: Viewer | un
 			return backTo(request, cookies);
 		}
 		if (value(f, "decision") !== "approve") return redirectWith(request, { error: "access_denied" });
-		const fresh = code();
-		await sql.begin(async (tx) => {
-			const [account] = await tx`select id from users where id = ${viewer.id}::bigint and status = 'active' and deactivated_at is null and instance is null for update`;
-			if (!account) throw new Error("Account cannot authorize apps.");
-			await tx`delete from oauth_codes where expires_at < now()`;
-			let clientId = request.dbId;
-			if (!isId(request.clientId)) {
-				const [row] = await tx`insert into oauth_clients(id, owner_id, name, redirect_uri, metadata_url, logo_uri) values(${newId()}::bigint, null, ${request.name}, ${request.redirect}, ${request.clientId}, ${request.icon})
-					on conflict (metadata_url) do update set name = excluded.name, redirect_uri = excluded.redirect_uri, logo_uri = excluded.logo_uri returning id::text, revoked`;
-				if (row.revoked) throw new Error("This app has been revoked.");
-				clientId = row.id;
-			}
-			await tx`insert into oauth_codes(code_hash, client_id, user_id, redirect_uri, scope, code_challenge, expires_at)
-				values(${digest(fresh)}, ${clientId}::bigint, ${viewer.id}::bigint, ${request.redirect}, ${request.scope}, ${request.challenge}, now() + interval '5 minutes')`;
-		});
-		return redirectWith(request, { code: fresh });
+		return issueAuthorizationCode(request, viewer);
 	}
+	// a first-party app already approved (and not revoked) skips the consent screen
+	if (request.firstParty && (await hasCurrentGrant(viewer.id, request.dbId, request.scope))) return issueAuthorizationCode(request, viewer);
 	const hidden = hiddenFields({ ...requestParams(request), csrf: viewer.csrf });
 	// what public-api.ts lets a token of this scope do; keep the two in step
 	const money = feature("money");

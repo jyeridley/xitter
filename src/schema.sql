@@ -2067,3 +2067,8 @@ create table if not exists market_auth_tickets (
 	expires_at timestamptz not null
 );
 create index if not exists market_auth_tickets_exp on market_auth_tickets (expires_at);
+
+-- first-party OAuth clients (the BSE site) may list extra redirects and, once
+-- someone has approved them, skip the consent screen on later sign-ins
+alter table oauth_clients add column if not exists redirect_uris text[];
+alter table oauth_clients add column if not exists first_party boolean not null default false;

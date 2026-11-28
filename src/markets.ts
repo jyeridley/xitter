@@ -10,15 +10,14 @@
 // inside the client with its side bars (tidy.ts frames /i/markets/embed in the
 // main column); frames, ?embed=1 and link fetchers get the page alone.
 
+import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Viewer } from "./auth";
-import { getViewer, startSession, sessionCookies, clearedCookies } from "./auth";
-import { BSE_HOST, BSE_NAME, BSE_SHORT, PUBLIC_ORIGIN, bseOrigin, isBseHost, isOwnOrigin, requestOrigin } from "./config";
+import { getViewer, startSession, sessionCookies, clearedCookies, SECURE } from "./auth";
+import { BSE_HOST, BSE_NAME, BSE_OAUTH_CLIENT_ID, BSE_SHORT, PUBLIC_ORIGIN, bseOrigin, isBseHost, isOwnOrigin, requestOrigin } from "./config";
 import { recordSignIn } from "./login-history";
-import { html as loginHtml, layout as loginLayout } from "./login";
-import { passwordStep } from "./password-sign-in";
-import { answerChallenge } from "./two-factor";
+import { redeemBseAuthorizationCode } from "./oauth";
 import { sql } from "./db";
 import { hateIn } from "./hate";
 import { avatarSrc } from "./model";
@@ -911,120 +910,87 @@ function bseNext(raw: string | null): string {
 	} catch {}
 	return "/";
 }
-async function issueTicket(userId: string): Promise<string> {
-	const token = Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString("hex");
-	await sql`delete from market_auth_tickets where expires_at < now()`;
-	await sql`insert into market_auth_tickets (token, user_id, expires_at) values (${token}, ${userId}::bigint, now() + interval '2 minutes')`;
-	return token;
-}
-function signedInOn(session: { token: string; csrf: string; userId: string }, location: string, status = 303): Response {
+
+const OAUTH_COOKIE = `${SECURE ? "__Host-" : ""}bse_oauth`;
+const challengeFor = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
+const randomUrl = (bytes = 32) => randomBytes(bytes).toString("base64url");
+
+function signedInOn(session: { token: string; csrf: string; userId: string }, location: string, clearOauth = true, status = 303): Response {
 	const headers = new Headers({ location });
 	for (const c of sessionCookies(session)) headers.append("set-cookie", c);
+	if (clearOauth) headers.append("set-cookie", `${OAUTH_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${SECURE}`);
 	return new Response(null, { status, headers });
 }
-function loginPage(opts: { action: string; next: string; error?: string; challenge?: string; standalone?: boolean }): Response {
-	const inst = settings().instance_name;
-	const next = esc(opts.next);
-	const action = esc(opts.action);
-	const err = opts.error ? `<p class="error" role="alert">${esc(opts.error)}</p>` : "";
-	const body = opts.challenge
-		? `<form method="post" action="${action}">
-	<h1>Enter your code</h1>
-	<p class="alt">Open your authenticator app and enter the code for ${esc(inst)}, or use a backup code.</p>
-	${err}
-	<input type="hidden" name="next" value="${next}">
-	<input type="hidden" name="c" value="${esc(opts.challenge)}">
-	<input name="code" inputmode="numeric" autocomplete="one-time-code" autofocus required aria-label="Code">
-	<button type="submit">Continue</button>
-	<p class="alt"><a href="${action}?next=${encodeURIComponent(opts.next)}">Start again</a></p>
-</form>`
-		: `<form method="post" action="${action}">
-	<h1>Sign in to the ${esc(BSE_SHORT)}</h1>
-	<p class="alt">Use your ${esc(inst)} account. Trading uses the same Money balance.</p>
-	${err}
-	<input type="hidden" name="next" value="${next}">
-	<label>Username<input name="username" autocomplete="username" autofocus required></label>
-	<label>Password<input name="password" type="password" autocomplete="current-password" required></label>
-	<button type="submit">Sign in</button>
-	${opts.standalone ? `<p class="alt"><a href="${esc(PUBLIC_ORIGIN)}${MARKETS_PATH}/connect?next=${encodeURIComponent(bseOrigin() + opts.next)}">Already signed in on ${esc(inst)}? Continue</a></p>` : ""}
-	<p class="alt"><a href="${esc(opts.standalone ? "/" : PUBLIC_ORIGIN + MARKETS_PATH)}">Cancel</a>${opts.standalone ? ` · <a href="${esc(PUBLIC_ORIGIN)}">${esc(inst)}</a>` : ""}</p>
-</form>`;
-	return loginHtml(loginLayout(`Sign in to the ${BSE_SHORT}`, body), opts.error ? 401 : 200);
+function oauthErrorPage(message: string, next: string): Response {
+	const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · ${esc(BSE_SHORT)}</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#000;color:#e7e9ea;font:15px system-ui,sans-serif}main{width:min(520px,calc(100vw - 32px))}h1{font-size:28px}a{color:#1d9bf0}p{color:#71767b}</style></head>
+<body><main><h1>Couldn't sign in</h1><p>${esc(message)}</p><p><a href="/login?next=${encodeURIComponent(next)}">Try again</a> · <a href="/">${esc(BSE_NAME)}</a></p></main></body></html>`;
+	return new Response(html, { status: 400, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
-async function finishBseLogin(req: Request, session: { token: string; csrf: string; userId: string }, next: string, handoff: boolean): Promise<Response> {
-	await recordSignIn(req, session);
-	if (!handoff) return signedInOn(session, bseNext(next));
-	const ticket = await issueTicket(session.userId);
-	const to = `${bseOrigin()}/auth?ticket=${encodeURIComponent(ticket)}&next=${encodeURIComponent(bseNext(next))}`;
-	return signedInOn(session, to);
+function oauthCookie(payload: string): string {
+	return `${OAUTH_COOKIE}=${encodeURIComponent(payload)}; Path=/; HttpOnly; Max-Age=600; SameSite=Lax${SECURE}`;
 }
-async function loginFromForm(req: Request, next: string, handoff: boolean): Promise<Response> {
-	const f = await req.formData().catch(() => undefined);
-	const get = (k: string) => (typeof f?.get(k) === "string" ? String(f.get(k)) : "");
-	const challenge = get("c"), code = get("code").trim();
-	const action = handoff ? `${MARKETS_PATH}/connect` : "/login";
-	if (challenge) {
-		const answered = await answerChallenge(challenge, code);
-		if (answered.session) return finishBseLogin(req, answered.session, next, handoff);
-		if (answered.unknown) return loginPage({ action, next, error: "That sign-in expired. Try again.", standalone: !handoff });
-		return loginPage({ action, next, error: answered.error ?? "That code isn't right.", challenge, standalone: !handoff });
-	}
-	const step = await passwordStep(get("username"), get("password"));
-	if ("session" in step) return finishBseLogin(req, step.session, next, handoff);
-	if ("challenge" in step) return loginPage({ action, next, challenge: step.challenge, standalone: !handoff });
-	return loginPage({ action, next, error: step.error, standalone: !handoff });
-}
-// on the main site: if the person is already signed in, send them to the BSE with a short-lived ticket; otherwise take their password here
-async function bseConnect(req: Request, viewer: Viewer | undefined): Promise<Response> {
-	const url = new URL(req.url);
-	const next = bseNext(url.searchParams.get("next") || (req.method === "POST" ? undefined : "/"));
-	if (req.method === "POST") {
-		const f = await req.clone().formData().catch(() => undefined);
-		const posted = typeof f?.get("next") === "string" ? bseNext(String(f.get("next"))) : next;
-		const h = hit("auth", optsIp(req));
-		if (!h.ok) return limitedResponse(h);
-		return loginFromForm(req, posted, true);
-	}
-	if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405 });
-	if (viewer) {
-		const ticket = await issueTicket(viewer.id);
-		return Response.redirect(`${bseOrigin()}/auth?ticket=${encodeURIComponent(ticket)}&next=${encodeURIComponent(next)}`, 302);
-	}
-	return loginPage({ action: `${MARKETS_PATH}/connect`, next, standalone: false });
-}
+// start Xitter's built-in authorization-code + PKCE flow on Bloxburg Social
 async function bseLogin(req: Request, viewer: Viewer | undefined): Promise<Response> {
 	const url = new URL(req.url);
 	const next = bseNext(url.searchParams.get("next"));
-	if (req.method === "POST") {
-		const f = await req.clone().formData().catch(() => undefined);
-		const posted = typeof f?.get("next") === "string" ? bseNext(String(f.get("next"))) : next;
-		const h = hit("auth", optsIp(req));
-		if (!h.ok) return limitedResponse(h);
-		return loginFromForm(req, posted, false);
-	}
 	if (viewer) return Response.redirect(next, 302);
-	return loginPage({ action: "/login", next, standalone: true });
+	const redirect = `${isBseHost(req) ? requestOrigin(req) : bseOrigin()}/auth/callback`;
+	const state = randomUrl(24), verifier = randomUrl(32);
+	const payload = Buffer.from(JSON.stringify({ state, verifier, next, redirect }), "utf8").toString("base64url");
+	const params = new URLSearchParams({
+		response_type: "code",
+		client_id: BSE_OAUTH_CLIENT_ID,
+		redirect_uri: redirect,
+		scope: "write",
+		state,
+		code_challenge: challengeFor(verifier),
+		code_challenge_method: "S256",
+	});
+	const headers = new Headers({ location: `${PUBLIC_ORIGIN}/oauth/authorize?${params}`, "cache-control": "no-store" });
+	headers.append("set-cookie", oauthCookie(payload));
+	return new Response(null, { status: 302, headers });
 }
-async function bseAuthRedeem(req: Request): Promise<Response> {
+async function bseAuthCallback(req: Request): Promise<Response> {
 	const url = new URL(req.url);
-	const ticket = url.searchParams.get("ticket") ?? "";
-	const next = bseNext(url.searchParams.get("next"));
-	if (!ticket) return Response.redirect(`/login?next=${encodeURIComponent(next)}`, 302);
-	const [row] = await sql`delete from market_auth_tickets where token = ${ticket} and expires_at > now() returning user_id::text as id`;
-	if (!row) return loginPage({ action: "/login", next, error: "That sign-in link expired. Sign in again.", standalone: true });
+	const nextGuess = bseNext(url.searchParams.get("next"));
+	let stored: { state?: string; verifier?: string; next?: string; redirect?: string } | undefined;
 	try {
-		const session = await startSession(row.id);
+		const raw = parseCookie(req, OAUTH_COOKIE);
+		if (raw) stored = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+	} catch {}
+	const next = bseNext(stored?.next ?? nextGuess);
+	if (url.searchParams.get("error") === "access_denied") return oauthErrorPage("You cancelled signing in.", next);
+	if (url.searchParams.get("error")) return oauthErrorPage("Bloxburg Social couldn't authorize this sign-in.", next);
+	const code = url.searchParams.get("code") ?? "", state = url.searchParams.get("state") ?? "";
+	if (!stored?.verifier || !stored.redirect || !state || state !== stored.state) return oauthErrorPage("That sign-in expired. Try again.", next);
+	const h = hit("auth", optsIp(req));
+	if (!h.ok) return limitedResponse(h);
+	const userId = await redeemBseAuthorizationCode(req, stored.redirect, code, stored.verifier);
+	if (!userId) return oauthErrorPage("Bloxburg Social didn't finish authorizing this sign-in.", next);
+	try {
+		const session = await startSession(userId);
 		await recordSignIn(req, session);
-		return signedInOn(session, next, 302);
+		return signedInOn(session, next);
 	} catch {
-		return loginPage({ action: "/login", next, error: "That account can't sign in right now.", standalone: true });
+		return oauthErrorPage("That account can't sign in right now.", next);
 	}
+}
+function parseCookie(req: Request, name: string): string | undefined {
+	const all = req.headers.get("cookie") ?? "";
+	for (const part of all.split(/;\s*/)) {
+		const i = part.indexOf("=");
+		if (i > 0 && part.slice(0, i) === name) return decodeURIComponent(part.slice(i + 1));
+	}
+	return undefined;
 }
 function bseLogout(next = "/"): Response {
 	const headers = new Headers({ location: bseNext(next) });
 	for (const c of clearedCookies()) headers.append("set-cookie", c);
+	headers.append("set-cookie", `${OAUTH_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${SECURE}`);
 	return new Response(null, { status: 302, headers });
 }
+
 function mapBsePage(pathname: string, q: URLSearchParams): { view?: string; ticker?: string | null } | null {
 	if (pathname === "/" || pathname === "") return { ticker: q.get("c") };
 	if (pathname === "/markets" || pathname === "/list") return { view: "list" };
@@ -1044,7 +1010,7 @@ export async function bseSite(req: Request, opts: { ip: string }): Promise<Respo
 	if (BSE_PASS.some((r) => r.test(p))) return;
 	const viewer = await getViewer(req);
 	if (p === "/login") return bseLogin(req, viewer);
-	if (p === "/auth") return bseAuthRedeem(req);
+	if (p === "/auth" || p === "/auth/" || p === "/auth/callback" || p === "/auth/callback/") return bseAuthCallback(req);
 	if (p === "/logout") return bseLogout(url.searchParams.get("next") ?? "/");
 	if (p === MARKETS_PATH || p.startsWith(`${MARKETS_PATH}/`)) {
 		return marketsRoute(req, p, viewer, { clientShell: false, ip: opts.ip });
@@ -1069,7 +1035,10 @@ export async function marketsRoute(req: Request, p: string, viewer: Viewer | und
 		if (top && opts.clientShell) return undefined;
 		return page(req, viewer);
 	}
-	if (p === `${MARKETS_PATH}/connect` || p === `${MARKETS_PATH}/connect/`) return bseConnect(req, viewer);
+	if (p === `${MARKETS_PATH}/connect` || p === `${MARKETS_PATH}/connect/`) {
+		const next = bseNext(url.searchParams.get("next"));
+		return Response.redirect(`${bseOrigin()}/login?next=${encodeURIComponent(next)}`, 302);
+	}
 	if (p === `${MARKETS_PATH}/export.png`) {
 		const h = hit("read", viewer ? `user:${viewer.id}` : `guest:${opts.ip}`);
 		if (!h.ok) return limitedResponse(h);

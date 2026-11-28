@@ -6,6 +6,9 @@ export const PUBLIC_HOSTNAME = new URL(PUBLIC_ORIGIN).hostname;
 // the Bloxburg Stock Exchange's own site: same app and accounts, its own host
 export const BSE_HOST = "trade.xitter.space";
 export const BSE_HOST_OLD = "trade.bs.xitter.space";
+// first-party OAuth client (oauth.ts): public PKCE, no client secret
+export const BSE_OAUTH_CLIENT_ID = "2124290000000000800";
+export const BSE_OAUTH_NAME = "BSE — Bloxburg Stock Exchange";
 export const BSE_NAME = "Bloxburg Stock Exchange";
 export const BSE_SHORT = "BSE";
 export const requestHostname = (req: Request) => (req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "").toLowerCase().split(",")[0].trim().split(":")[0];
