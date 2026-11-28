@@ -835,7 +835,7 @@ function companyForm(c){
  +'<label class=f><span>Company name<i id=n-name>0/50</i></span><input id=f-name maxlength=50 value="'+(c?esc(c.name):'')+'" placeholder="Bloxburg Burgers"></label>'
  +(isNew?'<div class=row style="gap:12px"><label class=f><span>Ticker</span><input id=f-ticker maxlength=5 placeholder="BURG" style="text-transform:uppercase;font-weight:700;letter-spacing:.05em"></label><label class=f><span>Sector</span><select id=f-sector>'+sec+'</select></label></div>':'<label class=f><span>Sector</span><select id=f-sector>'+sec+'</select></label>')
  +'<label class=f><span>What it does<i id=n-desc>0/200</i></span><textarea id=f-desc maxlength=200 placeholder="Burgers and fries, made fresh on Main Street.">'+(c?esc(c.description||''):'')+'</textarea></label>'
- +(isNew?'<div class=row style="gap:12px"><label class=f><span>Starting price (Money)</span><input id=f-price type=number min=0.1 max=1000 step=0.01 placeholder="10.00"></label><label class=f><span>Shares outstanding</span><input id=f-shares type=number min=1000 max=10000000 step=1 placeholder="100000"></label></div><div class=note style="margin:-6px 0 14px">Price $0.10–$1,000 · 1,000–10,000,000 shares · tickers are 2–5 letters.</div>':'')
+ +(isNew?'<div class=row style="gap:12px"><label class=f><span>Starting price (Money)</span><input id=f-price type=number min=100 max=1000 step=0.01 placeholder="100.00"></label><label class=f><span>Shares outstanding</span><input id=f-shares type=number min=1000 max=10000000 step=1 placeholder="100000"></label></div><div class=note style="margin:-6px 0 14px">Price $100–$1,000 · 1,000–10,000,000 shares · tickers are 2–5 letters.</div>':'')
  +(isNew&&!db.admin||c&&c.owner?'<div class=note style="margin:-4px 0 14px">'+(isNew?'Your':'Its founder\'s')+' profile picture and checkmark are the company\'s picture and badge. Change '+(isNew?'your':'their')+' picture on '+(isNew?'your':'their')+' profile and the market follows.</div>':'')
  +(isNew&&!db.admin&&!db.me.badge?'<div class="unv" style="margin:0 0 14px">'+SHIELD+'<div><b>Your company will be listed as unverified</b><span>Your account doesn\'t have a checkmark, so your company won\'t show one. '+unvText()+'</span></div></div>':'')
  +'<div class=err id=f-err></div><div class=row style="gap:8px"><button data-back>Cancel</button><button class=primary id=f-go>'+(isNew?'List company':'Save')+'</button></div></div></div></main>'}
@@ -847,7 +847,7 @@ function submitCompany(){
  var c=S.page==='edit'?C(S.cid):null,err=$('#f-err'),btn=$('#f-go');
  var body={name:$('#f-name').value.trim(),sector:$('#f-sector').value,description:$('#f-desc').value.trim()};
  if(c){body.id=c.id}else{body.ticker=$('#f-ticker').value.trim().toUpperCase();body.price=+$('#f-price').value;body.shares=+$('#f-shares').value}
- var bad=body.name.length<2?'Give the company a name':!c&&!/^[A-Z]{2,5}$/.test(body.ticker)?'Tickers are 2 to 5 letters':!c&&CT(body.ticker)?'That ticker is taken':body.description.length<10?'Describe the company in a sentence':!c&&!(body.price>=0.1&&body.price<=1000)?'The starting price is between $0.10 and $1,000':!c&&!(body.shares>=1000&&body.shares<=10000000)?'Shares outstanding are between 1,000 and 10,000,000':'';
+ var bad=body.name.length<2?'Give the company a name':!c&&!/^[A-Z]{2,5}$/.test(body.ticker)?'Tickers are 2 to 5 letters':!c&&CT(body.ticker)?'That ticker is taken':body.description.length<10?'Describe the company in a sentence':!c&&!(body.price>=100&&body.price<=1000)?'The starting price is between $100 and $1,000':!c&&!(body.shares>=1000&&body.shares<=10000000)?'Shares outstanding are between 1,000 and 10,000,000':'';
  if(bad){err.textContent=bad;return}
  err.textContent='';btn.disabled=true;
  api(c?'company':'register',body).then(function(st){db=st;var t=c?c.ticker:body.ticker;toast(c?'Saved':t+' is listed');setTimeout(function(){go('co',(CT(t)||{}).id||t)},500)},function(e){err.textContent=e.message;btn.disabled=false});
@@ -864,7 +864,7 @@ function adminPage(){
  +'<details class="card full"'+(S.openLog?' open':'')+' data-d=log><summary>Activity log</summary><br>'+adLog()+'</details></div></main>'}
 function adCo(){var e=EDIT&&C(EDIT);var sec='<option value="">Sector (optional)</option>'+(db.sectors||[]).map(function(s){return '<option>'+esc(s)+'</option>'}).join('');
  return (e?editForm(e):'')+'<div class=card><h3>List a company</h3><div class=row>'
- +'<input id=cn placeholder="Company name" maxlength=80><input id=ct placeholder="Ticker" maxlength=6><input id=cp type=number step=0.01 min=0.01 placeholder="Initial price"><input id=cs type=number min=1 placeholder="Shares outstanding"></div>'
+ +'<input id=cn placeholder="Company name" maxlength=80><input id=ct placeholder="Ticker" maxlength=6><input id=cp type=number step=0.01 min=100 placeholder="Initial price"><input id=cs type=number min=1 placeholder="Shares outstanding"></div>'
  +'<div class=row><select id=csec>'+sec+'</select><input id=cdesc maxlength=200 placeholder="Description (optional)"></div>'
  +'<div class=row><input id=cown maxlength=16 placeholder="Link an account: @username (optional)" autocapitalize=off spellcheck=false><label class=f style="margin:0"><span>Logo, only used without an account</span><input id=cl type=file accept="image/png,image/jpeg,image/gif,image/webp"></label></div>'
  +'<div class=note style="margin:2px 0 10px">A linked account\'s profile picture and checkmark show on the company.</div><div class=row><button class=primary data-a=list>List company</button></div></div>'
@@ -880,7 +880,7 @@ function adCtl(){var o=opts();
  return '<div class=card><h3>Market controls</h3>'
  +'<div class=row><input id=mp type=number min=0 step=0.1 placeholder="% for whole market"><button data-a=mkt data-sign=-1>Crash all</button><button class=primary data-a=mkt data-sign=1>Boost all</button></div>'
  +'<div class=row><select id=cg>'+o+'</select><input id=cgp type=number min=0 step=0.1 placeholder="%"><button data-a=coPct data-dir=-1>Crash</button><button class=primary data-a=coPct data-dir=1>Boost</button></div>'
- +'<div class=row><select id=sg>'+o+'</select><input id=sp type=number min=0.01 step=0.01 placeholder="Set exact price"><button data-a=setExact>Set price</button></div>'
+ +'<div class=row><select id=sg>'+o+'</select><input id=sp type=number min=100 step=0.01 placeholder="Set exact price"><button data-a=setExact>Set price</button></div>'
  +'<div class=row><select id=ag>'+o+'</select><input id=ad type=number step=0.01 placeholder="± amount"><button data-a=adjust>Adjust</button></div></div>'}
 function adEvents(){var ev=db.events||[];
  return '<div class=card><h3>Events</h3>'

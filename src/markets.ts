@@ -35,6 +35,7 @@ import { serveAvatar } from "./media";
 import { GUEST_ID } from "./blocks";
 import { art, artType } from "./verified-art";
 import { acceptDisclaimer, balanceOf, disclaimerAccepted, disclaimerText, economy } from "./money";
+import { PRICE_FLOOR, MAX_PRICE, clampPrice, impactOf } from "./markets-price";
 import { hit, limitedResponse } from "./ratelimit";
 import { NAME_MAX, feature, hasBlockedPhrase, settings } from "./settings";
 import { MONEY_ICON } from "./tidy";
@@ -52,16 +53,10 @@ const LOGS = 300;
 const CATS = ["Markets", "Corporate", "Economy", "Policy", "Major event"];
 const MAX_LOGO = 1_000_000;
 // the walk (see tick): a small wiggle each two-second step, as a fraction of the price.
-// Trades move the price a lot more (IMPACT_K below); fair value follows them, so this
+// Trades move the price a lot more; fair value follows them, so this
 // pull does not walk a trade back. Rare news shocks are applied after the wiggle.
 const STEP = 0.0004, PULL = 0.02, FAIR_DRIFT = 0.00015;
 const SHOCK_ODDS = 0.00018; // about one per company every three hours
-const MIN_PRICE = 0.0001, MAX_PRICE = 1e12;
-// a buy or sell: Δln(price) = IMPACT_K × (qty / shares) × (1 + MOMENTUM_PER × other
-// distinct investors on this side in the last 15 minutes), capped at 5× per order.
-// The order fills at the midpoint of the pre- and post-trade price, so buying and
-// selling the same size is a round trip at the same average and prints no profit.
-const IMPACT_K = 2000, MOMENTUM_PER = 0.55, IMPACT_CAP = Math.log(5);
 const SEED = 120; // steps of history a new listing starts with
 
 const esc = (t: string) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -86,15 +81,15 @@ async function tick() {
 	if (ticking) return;
 	ticking = true;
 	try {
-		// each listed price takes a small random step (log-normal, so a $0.10
-		// stock moves as visibly as a $100 one), pulled gently back towards a fair
+		// each listed price takes a small random step (log-normal, so a $100
+		// stock moves as visibly as a $1,000 one), pulled gently back towards a fair
 		// value that follows trades and wanders only slightly itself; prices keep
 		// six decimals, so no move is rounded away. Volume trickles in, more for
 		// the bigger companies. A rare news shock (±10–40% and a headline) is applied after.
 		const moved = await sql`with u as (
 			update market_companies set
-				fair = least(${MAX_PRICE}, greatest(${MIN_PRICE}, coalesce(fair, price::float8) * exp(random_normal(0, ${FAIR_DRIFT})))),
-				price = greatest(${MIN_PRICE}, least(${MAX_PRICE}, round((price::float8 * exp(random_normal(0, ${STEP}) + ${PULL} * ln(coalesce(fair, price::float8) / price::float8)))::numeric, 6))),
+				fair = least(${MAX_PRICE}, greatest(${PRICE_FLOOR}, coalesce(fair, price::float8) * exp(random_normal(0, ${FAIR_DRIFT})))),
+				price = greatest(${PRICE_FLOOR}, least(${MAX_PRICE}, round((price::float8 * exp(random_normal(0, ${STEP}) + ${PULL} * ln(coalesce(fair, price::float8) / price::float8)))::numeric, 6))),
 				volume = volume + floor(power(random(), 2) * greatest(12, shares / 20000.0))::bigint
 			where not suspended returning id, price)
 			insert into market_history (company_id, price) select id, price from u returning company_id`;
@@ -119,7 +114,7 @@ function pastWalk(price: number, n: number): number[] {
 	const out = [price];
 	let p = price;
 	for (let i = 1; i < n; i++) {
-		p = Math.max(MIN_PRICE, p * Math.exp(-(normal() * STEP * 1.6) + 0.04 * Math.log(price / p)));
+		p = Math.max(PRICE_FLOOR, p * Math.exp(-(normal() * STEP * 1.6) + 0.04 * Math.log(price / p)));
 		out.unshift(Number(p.toFixed(6)));
 	}
 	return out;
@@ -174,19 +169,6 @@ async function prune() {
 	await sql`delete from market_index where id <= (select id from market_index order by id desc offset ${INDEX} limit 1)`;
 }
 
-const clampPrice = (p: number) => {
-	if (!Number.isFinite(p) || p <= MIN_PRICE) return MIN_PRICE;
-	if (p >= MAX_PRICE) return MAX_PRICE;
-	return Number(p.toFixed(6));
-};
-// recentSameSide: other distinct investors who already traded this side in the burst
-function impactOf(side: "buy" | "sell", qty: number, shares: number, price: number, recentSameSide: number): { post: number; fill: number } {
-	const momentum = 1 + MOMENTUM_PER * Math.max(0, recentSameSide);
-	const logMove = Math.min(IMPACT_K * (qty / Math.max(shares, 1)) * momentum, IMPACT_CAP);
-	const post = clampPrice(price * Math.exp((side === "buy" ? 1 : -1) * logMove));
-	return { post, fill: clampPrice((price + post) / 2) };
-}
-
 const SHOCK_UP = [
 	(n: string, t: string, p: number) => `${n} (${t}) jumps ${p}% on a surprise burst of demand`,
 	(n: string, t: string, p: number) => `${n} (${t}) rallies ${p}% after a strong outlook`,
@@ -224,8 +206,8 @@ async function event(name: string, detail: string, viewer: Viewer) {
 }
 // the original's reprice(): a new price, a point on its chart, a log line
 async function reprice(id: string, ticker: string, price: number, why: string, viewer: Viewer) {
-	const p = Math.max(MIN_PRICE, Number(price.toFixed(price < 1 ? 6 : 2)));
-	await sql`update market_companies set price = ${p} where id = ${id}`;
+	const p = clampPrice(price);
+	await sql`update market_companies set price = ${p}, fair = ${p} where id = ${id}`;
 	await sql`insert into market_history (company_id, price) values (${id}, ${p})`;
 	await log(`${ticker} ${fmtP(p)} (${why})`, viewer);
 }
@@ -430,9 +412,9 @@ async function register(viewer: Viewer, b: any) {
 	if (!/^[A-Z]{2,5}$/.test(tk)) throw new Refusal("Tickers are 2 to 5 letters");
 	if (!sector) throw new Refusal("Choose a sector");
 	if (description.length < 10) throw new Refusal("Describe the company in a sentence");
-	if (!(price >= 0.1 && price <= 1000)) throw new Refusal("The starting price is between $0.10 and $1,000");
+	if (!(price >= PRICE_FLOOR && price <= 1000)) throw new Refusal("The starting price is between $100 and $1,000");
 	if (!(sh >= 1000 && sh <= 10_000_000)) throw new Refusal("Shares outstanding are between 1,000 and 10,000,000");
-	const p = Math.round(price * 100) / 100;
+	const p = clampPrice(Math.round(price * 100) / 100);
 	await sql.begin(async (tx) => {
 		// one account's listings counted under a lock of its own, so two at once can't both fit
 		await tx`select pg_advisory_xact_lock(hashtext(${`market-list:${viewer.id}`}))`;
@@ -494,10 +476,10 @@ async function listed() {
 const ADMIN: Record<string, (b: any, v: Viewer) => Promise<unknown>> = {
 	async list(b, v) {
 		const name = String(b.name ?? "").trim().slice(0, 80), tk = tickerOf(b.ticker), price = Number(b.price), sh = Math.floor(Number(b.shares));
-		if (!name || !tk || !(price > 0) || !(sh > 0)) throw new Refusal("Enter name, ticker, price and shares");
+		if (!name || !tk || !(price >= PRICE_FLOOR) || !(sh > 0)) throw new Refusal("Enter name, ticker, a price of at least $100, and shares");
 		if (price > 1e12 || sh > 1e15) throw new Refusal("That's too big a number");
 		const logo = logoOf(b.logo);
-		const p = Math.round(price * 100) / 100;
+		const p = clampPrice(Math.round(price * 100) / 100);
 		const sector = SECTORS.includes(b.sector) ? b.sector : null, description = cleanText(b.description, 200) || null;
 		const owner = (await ownerOf(b.owner)) ?? null;
 		const [c] = await sql`insert into market_companies (name, ticker, price, prev_close, shares, logo, logo_type, sector, description, owner_id)
@@ -548,7 +530,7 @@ const ADMIN: Record<string, (b: any, v: Viewer) => Promise<unknown>> = {
 	},
 	async setPrice(b, v) {
 		const c = await company(b.id), p = Number(b.price);
-		if (!(p > 0) || p > 1e12) throw new Refusal("Enter a price");
+		if (!(p >= PRICE_FLOOR) || p > 1e12) throw new Refusal("Enter a price of at least $100");
 		await reprice(c.id, c.ticker, p, "set price", v);
 	},
 	async adjust(b, v) {
