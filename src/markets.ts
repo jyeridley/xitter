@@ -37,6 +37,7 @@ import { art, artType } from "./verified-art";
 import { acceptDisclaimer, balanceOf, disclaimerAccepted, disclaimerText, economy } from "./money";
 import { PRICE_FLOOR, MAX_PRICE, clampPrice, impactOf } from "./markets-price";
 import { hit, limitedResponse } from "./ratelimit";
+import { DevError, connectedApps, connectedAppsHtml, devRoute, revokeFromAccount, type Deps as DevDeps, type TradeResult } from "./markets-dev";
 import { NAME_MAX, feature, hasBlockedPhrase, settings } from "./settings";
 import { MONEY_ICON } from "./tidy";
 
@@ -353,7 +354,7 @@ class Refusal extends Error {
 // A buy takes its money from the wallet and a sale pays into it, in one
 // transaction with the shares: the company's row, then the wallet, then the
 // holding are locked, so two orders at once can't spend the same coins.
-async function trade(viewer: Viewer, body: any) {
+async function trade(viewer: { id: string }, body: any, app?: { id: string; name: string }): Promise<TradeResult> {
 	if (!moneyOn()) throw new Refusal("Trading opens once Money is turned on.");
 	const side = body?.side === "sell" ? "sell" : body?.side === "buy" ? "buy" : null;
 	const q = Math.floor(Number(body?.qty));
@@ -362,8 +363,13 @@ async function trade(viewer: Viewer, body: any) {
 	const [me] = await sql`select status from users where id = ${viewer.id}`;
 	if (me?.status === "restricted") throw new Refusal("Your account can't trade right now.");
 	if (!(await disclaimerAccepted(viewer.id))) throw new Refusal(`Accept the ${coinName()} terms first.`);
+	// the website names a company by id, the API by ticker
+	const byTicker = typeof body?.ticker === "string" && body.ticker !== "" ? body.ticker.toUpperCase() : null;
+	let result!: TradeResult;
 	await sql.begin(async (tx) => {
-		const [c] = await tx`select id::text, ticker, price::float8, shares, suspended from market_companies where id = ${idOf(body?.id)} for update`;
+		const [c] = byTicker
+			? await tx`select id::text, ticker, price::float8, shares, suspended from market_companies where ticker = ${byTicker} for update`
+			: await tx`select id::text, ticker, price::float8, shares, suspended from market_companies where id = ${idOf(body?.id)} for update`;
 		if (!c) throw new Refusal("Company not found");
 		if (c.suspended) throw new Refusal("This listing is suspended");
 		const recent = await tx`select user_id::text as id from market_txns where ticker = ${c.ticker} and side = ${side} and created_at > now() - interval '15 minutes' and user_id <> ${viewer.id}::bigint`;
@@ -388,9 +394,12 @@ async function trade(viewer: Viewer, body: any) {
 		}
 		await tx`update market_companies set volume = volume + ${q}, price = ${post}, fair = ${post} where id = ${c.id}`;
 		await tx`insert into market_history (company_id, price) values (${c.id}, ${post})`;
-		await tx`insert into market_txns (user_id, side, ticker, qty, price, total, total_cents) values (${viewer.id}, ${side}, ${c.ticker}, ${q}, ${fill}, ${cents / 100}, ${cents})`;
+		const [tx2] = await tx`insert into market_txns (user_id, side, ticker, qty, price, total, total_cents, app_id, app_name)
+			values (${viewer.id}, ${side}, ${c.ticker}, ${q}, ${fill}, ${cents / 100}, ${cents}, ${app ? app.id : null}, ${app ? app.name : null}) returning id::text`;
+		result = { id: tx2.id, ticker: c.ticker, side, qty: q, fill, total_cents: cents, before: c.price, after: post };
 	});
 	changed++;
+	return result;
 }
 
 // ---------- listing: any account in good standing, and staff ----------
@@ -1147,8 +1156,43 @@ h2{font-size:1.1rem;margin:22px 0 10px;padding-top:18px;border-top:1px solid var
 @media(max-width:700px){.tick-mkt{width:88px;padding:0 12px}.tape{padding:18px 16px 6px}.bsehead{padding:0 16px;height:64px}.logo-wrap .logo{height:36px}.wrap{padding:28px 12px 40px}.card{padding:28px 20px 22px}}`;
 
 // ---------- the exchange's own pages around accounts: sign in, sign up, settings ----------
-const AUTH_NAV = `<nav class="hnav" aria-label="Primary"><a href="/markets">Listings</a><a href="/portfolio">Trading</a><a href="/overview">Market Data</a><a href="/#insights">Insights</a><a href="/#about">About</a></nav>`;
-async function bsePage(title: string, main: string, opts: { status?: number; csrf?: string; description?: string } = {}): Promise<Response> {
+// the developer portal's wider layout: app cards, key/value rows, code blocks, tables
+const DEV_CSS = `
+.wrap.wide{place-items:start center}
+.card.wide{width:min(980px,100%);max-width:980px}
+.card.wide h1{overflow-wrap:anywhere}
+.card.wide textarea{width:100%;min-height:84px;padding:10px 12px;border:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;border-radius:0;resize:vertical}
+.card.wide label small{display:block;margin-top:4px;color:var(--mut);font-size:13px}
+.card.wide label span i{font-weight:400;font-style:normal;color:var(--mut)}
+.apps{display:grid;gap:14px;margin:12px 0 4px}
+.app{border:1px solid var(--line);padding:16px 18px;background:#fff}
+.app h3{margin:0 0 4px;font-size:1.15rem}
+.meta{color:var(--mut);font-size:13px}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:6px 14px;font-size:14px;margin:10px 0}
+.kv dt{color:var(--mut);font-weight:600}.kv dd{margin:0;overflow-wrap:anywhere}
+.mono,code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+pre{background:#0f1a22;color:#e8f4fb;padding:14px 16px;overflow:auto;font-size:13px;line-height:1.55;margin:10px 0 16px;border-radius:0}
+pre code{background:none;padding:0;color:inherit}
+code.i{background:var(--band);padding:1px 6px;font-size:.88em;overflow-wrap:anywhere}
+.secret{border:2px solid var(--ink);background:var(--band);padding:12px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:14px;overflow-wrap:anywhere;margin:6px 0 14px;user-select:all}
+.warn{border-left:4px solid #b26a00;background:#fff7e6;padding:10px 14px;margin:14px 0;font-size:14px}
+table.t{width:100%;border-collapse:collapse;font-size:14px;margin:8px 0 14px}
+table.t th,table.t td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+table.t th{color:var(--mut);font-weight:600;font-size:13px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.btns{display:flex;gap:10px;margin-top:16px}.btns>*{flex:1;margin:0}
+.btn.alt,button.alt{background:#fff;color:#000}
+.btn.alt:hover,button.alt:hover{background:var(--band)}
+.btn.sm,button.sm{min-height:34px;padding:0 14px;font-size:14px;width:auto;margin:0}
+button.danger,.btn.danger{background:#fff;color:var(--dn);border-color:var(--dn)}
+button.danger:hover{background:#fdecec}
+.scope{padding:10px 0;border-top:1px solid var(--line)}
+.doc h2{margin-top:34px}.doc h3{margin:22px 0 4px;font-size:1.05rem}
+.toc{display:flex;flex-wrap:wrap;gap:6px 18px;margin:14px 0 4px;padding:10px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.doc ol{padding-left:22px}.doc li{margin:4px 0}
+@media(max-width:700px){.kv{grid-template-columns:1fr}.btns{flex-direction:column}}`;
+const AUTH_NAV = `<nav class="hnav" aria-label="Primary"><a href="/markets">Listings</a><a href="/portfolio">Trading</a><a href="/overview">Market Data</a><a href="/#insights">Insights</a><a href="/developers">Developers</a><a href="/#about">About</a></nav>`;
+async function bsePage(title: string, main: string, opts: { status?: number; csrf?: string; description?: string; wide?: boolean } = {}): Promise<Response> {
 	const inst = settings().instance_name;
 	const tape = await marketTape();
 	const html = `<!DOCTYPE html>
@@ -1157,11 +1201,11 @@ async function bsePage(title: string, main: string, opts: { status?: number; csr
 ${BSE_ICONS}
 <meta name="theme-color" content="#ffffff">
 <meta name="description" content="${esc(opts.description ?? `Your ${BSE_NAME} account.`)}">
-<style>${LOGIN_CSS}</style></head>
+<style>${LOGIN_CSS}${opts.wide ? DEV_CSS : ""}</style></head>
 <body>
 <header class="bsehead"><a class="wordmark" href="/" aria-label="${esc(BSE_SHORT)}">${BSE_WORDMARK}<span class="bname">${esc(BSE_NAME)}</span></a>${AUTH_NAV}<div class="grow"></div><a class="glink" href="${esc(PUBLIC_ORIGIN)}">${esc(inst)}</a></header>
 ${tape}
-<div class="wrap"><main class="card">
+<div class="wrap${opts.wide ? " wide" : ""}"><main class="card${opts.wide ? " wide" : ""}">
 ${main}
 </main></div>
 <p class="fine"><a href="/">${esc(BSE_NAME)}</a> · © 2026 Bloxburg Stock Exchange. Independent community project. Not affiliated with Roblox, Welcome to Bloxburg or the NYSE.</p>
@@ -1310,6 +1354,7 @@ const ACCOUNT_NOTES: Record<string, [string, boolean]> = {
 	dfailed: ["Discord didn't finish signing in. Try again.", true],
 	lastway: ["Add a password or link another account first: that's your only way to sign in.", true],
 	pwset: ["Your password is saved.", false],
+	revoked: ["That app can no longer use your account.", false],
 	pwbad: ["Passwords are 8 to 256 characters and have to match.", true],
 };
 async function accountPage(req: Request, viewer: Viewer): Promise<Response> {
@@ -1345,7 +1390,8 @@ async function accountPage(req: Request, viewer: Viewer): Promise<Response> {
 		body = `<dl class="facts"><dt>Name</dt><dd>${esc(u.name)}</dd><dt>Handle</dt><dd>@${esc(u.screen_name)} <span class="tag">${esc(inst)} account</span></dd></dl>
 <p class="note">You sign in to ${esc(BSE_SHORT)} with your ${esc(inst)} account. Your balance, holdings and companies stay tied to it. Change your picture, name or password on <a href="${esc(PUBLIC_ORIGIN)}/settings/account">${esc(inst)}</a>.</p>`;
 	}
-	const main = `<h1>Your account</h1>${note}${body}
+	const apps = connectedAppsHtml(await connectedApps(viewer.id), viewer, devDeps(""));
+	const main = `<h1>Your account</h1>${note}${body}${apps}
 <p class="links"><a href="/portfolio">Portfolio</a><a href="/logout">Sign out</a></p>`;
 	return bsePage(`Account · ${BSE_SHORT}`, main);
 }
@@ -1650,6 +1696,30 @@ function mapBsePage(pathname: string, q: URLSearchParams): { view?: string; tick
 }
 const BSE_PASS = [/^\/abs\//, /^\/public\//, /^\/profile_images\//, /^\/media\//, /^\/i\/xitter\//, /^\/healthz$/, /^\/sw\.js$/];
 // the BSE's own host: pretty paths, its own layout, and a way to sign in with a Bloxburg Social account
+// what the developer portal (markets-dev.ts) borrows from here: the themed page, the text filter and the website's own trade path
+function devDeps(ip: string): DevDeps {
+	return {
+		ip,
+		esc,
+		page: (title, main, o = {}) => bsePage(title, main, o),
+		cleanText: (v, max) => {
+			try {
+				return cleanText(v, max);
+			} catch (e) {
+				if (e instanceof Refusal) throw new DevError(e.message);
+				throw e;
+			}
+		},
+		trade: async (viewer, body, app) => {
+			try {
+				return await trade(viewer, body, app);
+			} catch (e) {
+				if (e instanceof Refusal) throw new DevError(e.message, e.status, "invalid_request");
+				throw e;
+			}
+		},
+	};
+}
 export async function bseSite(req: Request, opts: { ip: string }): Promise<Response | undefined> {
 	if (!isBseHost(req)) return;
 	const url = new URL(req.url);
@@ -1666,6 +1736,9 @@ export async function bseSite(req: Request, opts: { ip: string }): Promise<Respo
 	if (p === "/account" || p === "/settings" || p === "/account/unlink" || p === "/account/discord/unlink" || p === "/account/password") return bseAccountRoute(req, viewer, p);
 	if (p === "/auth" || p === "/auth/" || p === "/auth/callback" || p === "/auth/callback/") return bseAuthCallback(req);
 	if (p === "/logout") return bseLogout(url.searchParams.get("next") ?? "/");
+	if (p === "/account/apps/revoke") return viewer && req.method === "POST" ? revokeFromAccount(req, viewer, devDeps(opts.ip)) : Response.redirect(`/login?next=${encodeURIComponent("/account")}`, 302);
+	const dev = await devRoute(req, p, viewer, devDeps(opts.ip));
+	if (dev) return dev;
 	if (p === MARKETS_PATH || p.startsWith(`${MARKETS_PATH}/`)) {
 		return marketsRoute(req, p, viewer, { clientShell: false, ip: opts.ip });
 	}

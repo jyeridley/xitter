@@ -2092,3 +2092,50 @@ create unique index if not exists users_discord_id_key on users (discord_id) whe
 create index if not exists market_txns_ticker_created on market_txns (ticker, created_at desc);
 
 alter table market_accounts alter column cash set default 1000;
+
+-- BSE developer portal: registered apps, OAuth2 authorization codes and tokens.
+-- Secrets, codes and tokens are only ever stored as SHA-256 hashes.
+create table if not exists bse_apps (
+	id bigint primary key,
+	owner_id bigint not null references users (id) on delete cascade,
+	name text not null,
+	description text not null default '',
+	website text not null default '',
+	redirect_uris jsonb not null default '[]'::jsonb,
+	client_id text not null unique,
+	secret_hash text not null,
+	secret_rotated_at timestamptz,
+	disabled boolean not null default false,
+	created_at timestamptz not null default now()
+);
+create index if not exists bse_apps_owner on bse_apps (owner_id);
+create table if not exists bse_auth_codes (
+	code_hash text primary key,
+	app_id bigint not null references bse_apps (id) on delete cascade,
+	user_id bigint not null references users (id) on delete cascade,
+	scopes text not null,
+	redirect_uri text not null,
+	code_challenge text,
+	expires_at timestamptz not null,
+	created_at timestamptz not null default now()
+);
+create table if not exists bse_tokens (
+	id bigint primary key,
+	app_id bigint not null references bse_apps (id) on delete cascade,
+	user_id bigint not null references users (id) on delete cascade,
+	access_hash text not null unique,
+	refresh_hash text unique,
+	scopes text not null,
+	created_at timestamptz not null default now(),
+	access_expires_at timestamptz not null,
+	refresh_expires_at timestamptz,
+	revoked_at timestamptz,
+	last_used_at timestamptz,
+	-- the code exchange proved the app's secret (a public PKCE client did not): its refresh needs the secret too
+	confidential boolean not null default true
+);
+create index if not exists bse_tokens_user on bse_tokens (user_id, app_id);
+create index if not exists bse_tokens_app on bse_tokens (app_id);
+-- which app placed a trade (null: the website)
+alter table market_txns add column if not exists app_id bigint references bse_apps (id) on delete set null;
+alter table market_txns add column if not exists app_name text;

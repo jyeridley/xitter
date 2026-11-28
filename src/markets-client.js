@@ -933,7 +933,7 @@ function tabs(){return [['dash','Overview'],['list','Markets']].concat(db.me?[['
 function bseNav(){
  var P=S.page,L=[['list','Listings',P==='list'||P==='co'||P==='new'||P==='edit'],['acct','Trading',P==='acct'],['dash','Market Data',P==='dash']];
  var h=L.map(function(t){return '<a href="'+pathOf(t[0])+'" data-go="'+t[0]+'" class="'+(t[2]?'on':'')+'">'+t[1]+'</a>'}).join('');
- h+='<a href="/#insights" data-sec=insights>Insights</a><a href="/#about" data-sec=about>About</a>';
+ h+='<a href="/#insights" data-sec=insights>Insights</a><a href="/developers">Developers</a><a href="/#about" data-sec=about>About</a>';
  if(db.admin)h+='<a href="/admin" data-go=admin class="'+(P==='admin'?'on':'')+'">Admin</a>';
  return h;
 }
@@ -942,7 +942,7 @@ function siteHead(){
  var me=db.me;
  var nav=bseNav();
  var account=me
-  ? '<a class=bal href="/portfolio" data-go="acct" title="Money balance">'+coin+'<span class=num>'+fmt(me.cash)+'</span></a><details class=acct><summary>'+(me.avatar?'<img src="'+esc(me.avatar)+'" alt="">':'')+'<span>'+esc(me.name)+'</span></summary><div class=acctm><div class=lbl style="padding:4px 12px 8px">'+who(me)+'</div><a href="/portfolio" data-go="acct">Portfolio</a><a href="/account">Account settings</a><div class=lbl>'+fmt(me.cash)+' Money available</div><a href="/logout">Log out</a></div></details>'
+  ? '<a class=bal href="/portfolio" data-go="acct" title="Money balance">'+coin+'<span class=num>'+fmt(me.cash)+'</span></a><details class=acct><summary>'+(me.avatar?'<img src="'+esc(me.avatar)+'" alt="">':'')+'<span>'+esc(me.name)+'</span></summary><div class=acctm><div class=lbl style="padding:4px 12px 8px">'+who(me)+'</div><a href="/portfolio" data-go="acct">Portfolio</a><a href="/account">Account settings</a>'+(db.admin?'<a href="/developers/admin">Developer apps</a>':'')+'<div class=lbl>'+fmt(me.cash)+' Money available</div><a href="/logout">Log out</a></div></details>'
   : '<a class="small primary" href="'+esc(signInHref())+'">Sign in</a>';
  return '<header class=bsehead><a class=wordmark href="/" data-go="home" aria-label="'+esc(BSE_SHORT)+'">'+logoImgs()+'<span class=bname>'+esc(BSE_NAME)+'</span></a><nav class=hnav aria-label="Primary">'+nav+'</nav><div class=grow></div>'
   +'<div class=hsearch>'+SEARCH_ICO+'<input id=qtop type=search placeholder="Search tickers" value="'+esc(S.qtop||'')+'" autocomplete=off aria-label="Search tickers"><div id=qsug role="listbox" aria-label="Matching companies"></div></div>'
