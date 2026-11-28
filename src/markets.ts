@@ -17,7 +17,7 @@ import type { Viewer } from "./auth";
 import { getViewer, login, startSession, sessionCookies, clearedCookies, SECURE, sessionKey } from "./auth";
 import { BSE_NAME, BSE_OAUTH_CLIENT_ID, BSE_SHORT, PUBLIC_ORIGIN, bseOrigin, isBseHost, isBseHostName, isOwnOrigin, requestOrigin } from "./config";
 import { recordSignIn, requestCountry } from "./login-history";
-import { evadedSuspension, isReserved, usernameProblem } from "./invites";
+import { isReserved, usernameProblem } from "./invites";
 import { forgetHeld, handleHeld } from "./held";
 import { blockedNameIn, forbiddenText } from "./names";
 import { looksBlank } from "./text-clean";
@@ -1192,7 +1192,7 @@ ${opts.error ? `<p class="error" role="alert">${esc(opts.error)}</p>` : ""}
 // a BSE-only account: a row in users marked bse_only, its password hashed as
 // every other account's is (auth.ts createUser); the same handle rules as
 // sign-up on the social site (invites.ts), so a social handle can't be taken
-async function bseSignUp(f: { username: string; name: string; password: string; password2: string; ip: string | null; country: string | null }): Promise<string> {
+async function bseSignUp(f: { username: string; name: string; password: string; password2: string; country: string | null }): Promise<string> {
 	const screenName = f.username.trim().replace(/^@/, "");
 	if (looksBlank(f.name)) throw new Refusal("Enter your name.");
 	const name = f.name.trim();
@@ -1206,7 +1206,6 @@ async function bseSignUp(f: { username: string; name: string; password: string; 
 	if (f.password.length < 8) throw new Refusal("Passwords are at least 8 characters.");
 	if (f.password.length > 256) throw new Refusal("Passwords are at most 256 characters.");
 	if (f.password !== f.password2) throw new Refusal("The passwords don't match.");
-	if (await evadedSuspension(null, f.ip)) throw new Refusal("Sign-up isn't available for you right now.");
 	const hash = await Bun.password.hash(f.password);
 	const id = newId();
 	await sql.begin(async (tx) => {
@@ -1229,14 +1228,8 @@ async function bseSignupRoute(req: Request, viewer: Viewer | undefined): Promise
 	const next = bseNext(field("next") || url.searchParams.get("next"));
 	const typed = { username: field("username").trim(), name: field("name") };
 	if (!form || !validLoginPost(req, field("csrf"))) return signupPage(req, { next, error: "That form expired. Try again.", status: 403, typed });
-	const ip = optsIp(req);
-	const h = hit("auth", ip);
-	if (!h.ok) return limitedResponse(h);
-	// new accounts from one address: a few an hour
-	const made = hit("mail", `bse-signup:${ip}`);
-	if (!made.ok) return signupPage(req, { next, error: "Too many new accounts from your network. Try again later.", status: 429, typed });
 	try {
-		await bseSignUp({ username: field("username"), name: field("name"), password: field("password"), password2: field("password2"), ip: ip === "unknown" ? null : ip, country: requestCountry(req) ?? null });
+		await bseSignUp({ username: field("username"), name: field("name"), password: field("password"), password2: field("password2"), country: requestCountry(req) ?? null });
 	} catch (e) {
 		if (e instanceof Refusal) return signupPage(req, { next, error: e.message, status: 400, typed });
 		throw e;
