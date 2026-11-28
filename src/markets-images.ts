@@ -37,7 +37,8 @@ export function avatarUrl(u: {
 	avatar_url?: string | null;
 	link_avatar?: string | null;
 }): string | null {
-	return u.bse_avatar_url || u.discord_avatar || (u.bse_only ? (u.link_avatar ?? null) : (u.avatar_url ?? null)) || null;
+	// after the one-time snapshot, BSE display uses only the BSE-owned picture
+	return u.bse_avatar_url || null;
 }
 
 // a company shows only its own logo; the founder's picture is never a stand-in

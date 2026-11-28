@@ -533,12 +533,11 @@ var pill=function(x){return '<span class="pill '+(x>=0?'up':'dn')+'">'+(x>=0?ARR
 var logo=function(c,cls){return c.img?'<img class="logo-img '+(cls||'')+'" src="'+esc(c.img)+'" alt="" data-tk="'+esc(c.ticker.slice(0,4))+'">':'<span class="logo-img '+(cls||'')+'">'+esc(c.ticker.slice(0,4))+'</span>'};
 // its name with the founder's checkmark
 function nm(c,cls){return '<div class="nm '+(cls||'')+'"><span>'+esc(c.name)+'</span>'+badge(c.verified?'business':'')+'</div>'}
-// a BSE-only account shows its username with a BSE tag, never as an @handle: those are Bloxburg Social's
-function who(a){return '@'+esc(a.handle)+(a.bse?' <span class=bsetag title="BSE account">BSE</span>':'')}
-// someone on a company's page: picture, name, checkmark, @handle; social accounts open their profile
-function person(o,right){var to=o.bse?o.link:o.handle;
+function who(a){return '@'+esc(a.handle)}
+// someone on a company's page: picture, name, checkmark, @handle
+function person(o,right){
  var inner='<img class="pp'+(o.sq?' sq':'')+'" src="'+esc(o.avatar)+'" alt=""><div class=who><div class=t1><span>'+esc(o.name)+'</span>'+badge(o.badge)+'</div><div class=t2>'+who(o)+'</div></div>'+(right||'');
- return to?'<a class="item prow" href="/'+esc(to)+'" data-client="/'+esc(to)+'">'+inner+'</a>':'<div class="item prow">'+inner+'</div>'}
+ return '<div class="item prow">'+inner+'</div>'}
 function ago(t){var s=Math.max(0,(Date.now()-t)/1000);return s<60?'just now':s<3600?Math.floor(s/60)+'m ago':s<86400?Math.floor(s/3600)+'h ago':Math.floor(s/86400)+'d ago'}
 function holdersPanel(c){
  var rows=(c.holders||[]).map(function(h){var pc=c.shares?h.qty/c.shares*100:0;return person(h,'<div class=r><b class=num>'+qn(h.qty)+'</b><div class="t2 num">'+(pc>=0.01?pc.toFixed(2):'<0.01')+'%</div></div>')}).join('');
@@ -549,9 +548,8 @@ function tradesPanel(c){
  return '<div class="panel trades" style="margin:0" id=trades><div class=hd><h3>Recent trades</h3></div><div class=list>'+(rows||'<div class=lbl style="padding:0 16px 16px">No trades in the last 30 days.</div>')+'</div></div>';
 }
 function founder(o){if(!o)return '';
- var inner='<img src="'+esc(o.avatar)+'" alt=""><b>'+esc(o.name)+'</b>'+badge(o.badge)+'<span class=lbl>'+who(o)+(o.bse&&o.link?' · @'+esc(o.link):'')+'</span>';
- var to=o.bse?o.link:o.handle;
- return to?'<a class="founder'+(o.sq?' sq':'')+'" href="/'+esc(to)+'" data-client="/'+esc(to)+'">'+inner+'</a>':'<span class="founder'+(o.sq?' sq':'')+'">'+inner+'</span>'}
+ var inner='<img src="'+esc(o.avatar)+'" alt=""><b>'+esc(o.name)+'</b>'+badge(o.badge)+'<span class=lbl>'+who(o)+'</span>';
+ return '<span class="founder'+(o.sq?' sq':'')+'">'+inner+'</span>'}
 function headlines(){
  if(!db.headlines.length)return '';
  return '<div class=news><span class="tag live">MARKET HEADLINES</span><div class=track>'+db.headlines.map(function(h){return (h.brk?'<span class="tag brk">BREAKING</span>':'')+'<span class=lbl>'+esc(h.cat)+'</span><span>'+(h.ticker?'<b>'+esc(h.ticker)+'</b> ':'')+esc(h.text)+'</span>'}).join('<span class=dot>·</span>')+'</div></div>'}
@@ -648,8 +646,7 @@ function siteFoot(){
  if(SITE!=='bse')return note;
  var links='<a href="/" data-go="home">Home</a><a href="/markets" data-go="list">Listings</a><a href="/overview" data-go="dash">Market Data</a>'
   +(db.me?'<a href="/portfolio" data-go="acct">Portfolio</a>':'<a href="'+esc(signInHref())+'">Sign in</a>')
-  +(db.me&&db.me.canList?'<a href="/new" data-go="new">List a company</a>':'')
-  +(HOME?'<a href="'+esc(HOME)+'">'+esc(db.instance||'Bloxburg Social')+'</a>':'');
+  +(db.me&&db.me.canList?'<a href="/new" data-go="new">List a company</a>':'');
  return '<footer class=bsefoot><a class="wordmark brand" href="/" data-go="home" aria-label="'+esc(BSE_SHORT)+'">'+logoImgs()+'</a><div class=flinks>'+links+'</div>'+note+'<div class=fine><span>© 2026 Bloxburg Stock Exchange · BloxburgStockExchange.Org</span><span>Independent community project. Not affiliated with Roblox, Welcome to Bloxburg or the NYSE.</span></div></footer>';
 }
 function dockNav(){
@@ -909,7 +906,7 @@ function adHl(){return '<div class=card><h3>Headlines</h3><input id=ht placehold
  +'<button class=primary data-a=pubHl>Publish</button></div>'
  +'<div style="overflow-x:auto;margin-top:8px"><table>'+(db.headlines.map(function(h){return '<tr><td style="white-space:normal">'+(h.brk?'<span class="tag brk">BREAKING</span> ':'')+esc(h.text)+'<div class=lbl>'+esc(h.cat)+(h.ticker?' · '+esc(h.ticker):'')+'</div></td><td><button class=small data-a=edHl data-id="'+h.id+'">Edit</button> <button class="small danger" data-a=delHl data-id="'+h.id+'">Delete</button></td></tr>'}).join('')||'<tr><td class=lbl>No headlines</td></tr>')+'</table></div></div>'}
 function adAcc(){var A=AD.accounts||[];var rows=filterRows(A,S.accFilter,function(a){return !!a.verified});
- return adFilter('acc',A)+'<div class=lbl>BSE accounts. A checkmark here is only on the exchange; it does not change a Bloxburg Social badge.</div><div style="overflow-x:auto"><table><tr><th>Account</th><th>Status</th><th>Money</th><th class=m>In shares</th><th class=m>Positions</th><th></th></tr>'
+ return adFilter('acc',A)+'<div class=lbl>BSE accounts. Verify or unverify the checkmark shown on the exchange.</div><div style="overflow-x:auto"><table><tr><th>Account</th><th>Status</th><th>Money</th><th class=m>In shares</th><th class=m>Positions</th><th></th></tr>'
  +(rows.map(function(a){return '<tr><td>@'+esc(a.screen_name)+' <span class=lbl>'+esc(a.name)+'</span>'+badge(a.badge)+'</td><td>'+(a.verified?'<span class="tag ok">Verified</span>':'<span class=lbl>Unverified</span>')+'</td><td>'+fmt(a.cash)+'</td><td class=m>'+fmt(a.equity)+'</td><td class=m>'+a.positions+'</td><td><button class=small data-a=verifyUser data-id="'+esc(a.id)+'" data-on="'+(a.verified?'0':'1')+'">'+(a.verified?'Unverify':'Verify')+'</button></td></tr>'}).join('')||'<tr><td colspan=6 class=lbl>No accounts</td></tr>')+'</table></div>'}
 function adLog(){return (AD.logs.map(function(e){return '<div style="padding:8px 0;border-bottom:1px solid var(--line);font-size:14px"><span class=lbl>'+new Date(e.t).toLocaleString()+'</span> · '+esc(e.a)+'</div>'}).join('')||'<p class=lbl>No activity yet.</p>')}
 function adFilter(kind,rows){var f=kind==='co'?S.coFilter:S.accFilter;var ver=rows.filter(function(x){return !!x.verified}).length;
@@ -931,7 +928,7 @@ var ADMIN={
  clearLogo:function(id){act('clearLogo',{id:id})},
  suspend:function(id){act('suspend',{id:id})},
  verifyCo:function(id,el){var on=el.getAttribute('data-on')==='1';act('verifyCompany',{id:id,on:on},on?null:'Remove the gold checkmark from this company?')},
- verifyUser:function(id,el){var on=el.getAttribute('data-on')==='1';act('verifyUser',{id:id,on:on},on?null:'Remove this account\'s checkmark on the exchange? It does not change a Bloxburg Social badge.')},
+ verifyUser:function(id,el){var on=el.getAttribute('data-on')==='1';act('verifyUser',{id:id,on:on},on?null:'Remove this account\'s checkmark on the exchange?')},
  filterco:function(_,el){S.coFilter=el.getAttribute('data-filter')||'';render()},
  filteracc:function(_,el){S.accFilter=el.getAttribute('data-filter')||'';render()},
  remove:function(id){var c=C(id);act('remove',{id:id},'Delete '+c.ticker+'? Everyone\'s shares in it go with it.')},
@@ -995,7 +992,7 @@ document.addEventListener('click',function(e){
  var t=e.target.closest('[data-export],[data-go],[data-ir],[data-range],[data-side],[data-step],[data-preset],[data-a],[data-back],[data-client],[data-accept],[data-sort],[data-sector],#tk-go,#f-go');if(!t)return;
  if(t.hasAttribute('data-client')){e.preventDefault();client(t.getAttribute('data-client'));return}
  if(t.hasAttribute('data-go')){e.preventDefault();go(t.getAttribute('data-go'),t.getAttribute('data-id')||undefined);return}
- if(t.hasAttribute('data-back')){e.preventDefault();if(!framed&&S.page==='dash'){location.assign(SITE==='bse'&&HOME?HOME:'/home');return}var c=C(S.cid);if(S.page==='edit'&&c)go('co',c.id);else if(S.page==='co'||S.page==='new'||S.page==='edit')go(Q.get('from')||'list');else client('/home');return}
+ if(t.hasAttribute('data-back')){e.preventDefault();if(!framed&&S.page==='dash'){go('home');return}var c=C(S.cid);if(S.page==='edit'&&c)go('co',c.id);else if(S.page==='co'||S.page==='new'||S.page==='edit')go(Q.get('from')||'list');else client('/home');return}
  if(t.hasAttribute('data-ir')){S.ir=+t.getAttribute('data-ir');render();return}
  if(t.hasAttribute('data-sort')){var k=t.getAttribute('data-sort');if(S.sort===k)S.dir=-S.dir;else{S.sort=k;S.dir=k==='name'?1:-1}render();return}
  if(t.hasAttribute('data-sector')){S.sector=t.getAttribute('data-sector')||'';render();return}

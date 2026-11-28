@@ -4,6 +4,7 @@ import { gbeePage } from "./gbee-page";
 import { CLIENT_DIR, clientDir, clientPathAllowed, getClientFile, getClientFilePath, hasClientFile, withClientDir } from "./client-cache";
 import { CLIENT_COOKIE, chosenClient, clientCookie, clientRoute, requestClient, switchByQuery } from "./client-choice";
 import { BSE_HOST, BSE_HOST_LEGACY, BSE_HOST_OLD, PORT, PUBLIC_ORIGIN, bseOrigin, isBseHost, isOwnOrigin } from "./config";
+import { snapshotBseProfiles } from "./markets-snapshot";
 import { migrate, sql } from "./db";
 import { knownOperation, runOperation } from "./graphql";
 import { brandingFile } from "./branding";
@@ -387,6 +388,8 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 }
 
 await migrate();
+const bseSnap = await snapshotBseProfiles();
+if (!bseSnap.skipped) console.log("bse profile snapshot", { accounts: bseSnap.accounts, names: bseSnap.names, avatars: bseSnap.avatars, checks: bseSnap.checks, avatarsFailed: bseSnap.avatarsFailed });
 await ensureBseOAuthClient();
 await expireSanctions();
 setInterval(

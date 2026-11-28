@@ -234,14 +234,13 @@ let cache: { key: number; at: number; value: Promise<Shared> } | undefined;
 async function loadShared(): Promise<Shared> {
 	// who holds each company and its latest trades, public on its page: a BSE-only
 	// account shows its linked social account's picture and checkmark
-	const PERSON = sql`u.screen_name as handle, coalesce(nullif(u.bse_name, ''), u.name) as name, u.bse_only, case when u.bse_verified is true then 'blue' when u.bse_verified is false then null when u.bse_only then l.verified_type else u.verified_type end as badge,
-		coalesce(u.bse_avatar_url, u.discord_avatar, case when u.bse_only then l.avatar_url else u.avatar_url end) as avatar, l.screen_name as link`;
+	const PERSON = sql`u.screen_name as handle, coalesce(nullif(u.bse_name, ''), u.name) as name, u.bse_only, u.bse_verified_type as badge,
+		u.bse_avatar_url as avatar`;
 	const [rows, hist, index, headlines, events, gap, holders, trades] = await Promise.all([
 		sql`select c.id::text, c.name, c.ticker, c.logo_v, c.logo is not null as has_logo, c.price::float8, c.prev_close::float8, c.shares::float8, c.volume::float8, (extract(epoch from c.listed_at) * 1000)::float8 as listed, c.suspended, c.verified,
-			coalesce(c.sector, '') as sector, coalesce(c.description, '') as description, u.id::text as owner_id, u.screen_name as owner_handle, coalesce(nullif(u.bse_name, ''), u.name) as owner_name, u.bse_only as owner_bse, l.screen_name as owner_link,
-			case when u.bse_verified is true then 'blue' when u.bse_verified is false then null when u.bse_only then l.verified_type else u.verified_type end as owner_badge, coalesce(u.bse_avatar_url, u.discord_avatar, case when u.bse_only then l.avatar_url else u.avatar_url end) as owner_avatar
-			from market_companies c left join users u on u.id = c.owner_id and u.status <> 'suspended' and u.deactivated_at is null
-			left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null order by c.id`,
+			coalesce(c.sector, '') as sector, coalesce(c.description, '') as description, u.id::text as owner_id, u.screen_name as owner_handle, coalesce(nullif(u.bse_name, ''), u.name) as owner_name, u.bse_only as owner_bse,
+			u.bse_verified_type as owner_badge, u.bse_avatar_url as owner_avatar
+			from market_companies c left join users u on u.id = c.owner_id and u.status <> 'suspended' and u.deactivated_at is null order by c.id`,
 		sql`select company_id::text as c, (extract(epoch from t) * 1000)::float8 as t, price::float8 as p from (select company_id, t, price, id, row_number() over (partition by company_id order by id desc) rn from market_history) x where rn <= ${HIST_SENT} order by company_id, id`,
 		sql`select (extract(epoch from t) * 1000)::float8 as t, value from (select * from market_index order by id desc limit ${INDEX}) x order by id`,
 		sql`select id::text, text, cat, ticker, breaking, (extract(epoch from created_at) * 1000)::float8 as t from market_headlines order by id desc limit 100`,
@@ -250,15 +249,15 @@ async function loadShared(): Promise<Shared> {
 		sql`select x.c, x.qty, x.n, ${PERSON} from (select company_id::text as c, user_id, qty, count(*) over (partition by company_id)::int as n,
 				row_number() over (partition by company_id order by qty desc, user_id) as rn
 				from market_holdings h where qty > 0 and exists (select 1 from users v where v.id = h.user_id and v.status <> 'suspended' and v.deactivated_at is null)) x
-			join users u on u.id = x.user_id left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null
+			join users u on u.id = x.user_id
 			where x.rn <= 25 order by x.c, x.qty desc`,
 		sql`select x.ticker, x.side, x.qty, x.price::float8 as price, (extract(epoch from x.created_at) * 1000)::float8 as t, x.app_name, x.app_id, a.logo_v, a.logo is not null as has_app_logo, ${PERSON}
 			from (select ticker, side, qty, price, created_at, user_id, app_id, app_name, row_number() over (partition by ticker order by id desc) as rn from market_txns where created_at > now() - interval '30 days') x
-			join users u on u.id = x.user_id left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null
+			join users u on u.id = x.user_id
 			left join bse_apps a on a.id = x.app_id
 			where x.rn <= 15 and u.status <> 'suspended' and u.deactivated_at is null order by x.ticker, x.created_at desc`,
 	]);
-	const person = (r: any) => ({ handle: r.handle, name: r.name, bse: !!r.bse_only, link: r.link ?? null, badge: r.badge ?? null, avatar: pfpOf(r.avatar), sq: squareBadge(r.badge) });
+	const person = (r: any) => ({ handle: r.handle, name: r.name, bse: !!r.bse_only, link: null, badge: r.badge ?? null, avatar: pfpOf(r.avatar), sq: squareBadge(r.badge) });
 	const holdersBy = new Map<string, { list: any[]; n: number }>();
 	for (const r of holders) {
 		const e = holdersBy.get(r.c) ?? holdersBy.set(r.c, { list: [], n: r.n }).get(r.c)!;
@@ -271,7 +270,7 @@ async function loadShared(): Promise<Shared> {
 	return {
 		companies: rows.map((c: any) => {
 			const logo = c.has_logo ? `${MARKETS_PATH}/logo/${c.id}?v=${c.logo_v}` : "";
-			const owner: Owner | null = c.owner_id ? { id: c.owner_id, handle: c.owner_handle, name: c.owner_name, bse: !!c.owner_bse, link: c.owner_link ?? null, badge: c.owner_badge ?? null, avatar: pfpOf(c.owner_avatar), custom: !!c.owner_avatar, sq: squareBadge(c.owner_badge) } : null;
+			const owner: Owner | null = c.owner_id ? { id: c.owner_id, handle: c.owner_handle, name: c.owner_name, bse: !!c.owner_bse, link: null, badge: c.owner_badge ?? null, avatar: pfpOf(c.owner_avatar), custom: !!c.owner_avatar, sq: squareBadge(c.owner_badge) } : null;
 			// the company's own logo only; the founder's picture sits next to their name, never as the stock
 			return {
 			id: c.id, name: c.name, ticker: c.ticker, logo, img: companyImage(logo), sq: true,
@@ -304,9 +303,9 @@ function shared(): Promise<Shared> {
 async function account(viewer: Viewer) {
 	const on = moneyOn();
 	const [[u], holdings, txns, [owned]] = await Promise.all([
-		sql`select u.status, coalesce(nullif(u.bse_name, ''), u.name) as name, u.bse_only, case when u.bse_verified is true then 'blue' when u.bse_verified is false then null when u.bse_only then l.verified_type else u.verified_type end as verified_type,
-			coalesce(u.bse_avatar_url, u.discord_avatar, case when u.bse_only then l.avatar_url else u.avatar_url end) as avatar_url, l.screen_name as link_handle
-			from users u left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null where u.id = ${viewer.id}`,
+		sql`select u.status, coalesce(nullif(u.bse_name, ''), u.name) as name, u.bse_only, u.bse_verified_type as verified_type,
+			u.bse_avatar_url as avatar_url
+			from users u where u.id = ${viewer.id}`,
 		sql`select company_id::text as id, qty, cost from market_holdings where user_id = ${viewer.id}`,
 		sql`select side, ticker, qty, price::float8, coalesce(total_cents::float8 / 100, total::float8) as total, (extract(epoch from created_at) * 1000)::float8 as t from market_txns where user_id = ${viewer.id} order by id desc limit 100`,
 		sql`select count(*)::int as n from market_companies where owner_id = ${viewer.id}`,
@@ -318,7 +317,7 @@ async function account(viewer: Viewer) {
 	return {
 		handle: viewer.screen_name,
 		bse: !!u?.bse_only,
-		link: u?.link_handle ?? null,
+		link: null,
 		name: u?.name ?? viewer.screen_name,
 		avatar: pfpOf(u?.avatar_url),
 		sq: squareBadge(u?.verified_type),
@@ -629,10 +628,12 @@ const ADMIN: Record<string, (b: any, v: Viewer) => Promise<unknown>> = {
 	async verifyUser(b, v) {
 		const id = idOf(b.user ?? b.id);
 		const on = b.on !== false && b.on !== 0 && b.on !== "0";
-		const [u] = await sql`select id::text, screen_name, bse_verified from users where id = ${id}::bigint and deactivated_at is null`;
+		const [u] = await sql`select id::text, screen_name, bse_verified, bse_verified_type from users where id = ${id}::bigint and deactivated_at is null`;
 		if (!u) throw new Refusal("No such account");
-		if (u.bse_verified === on) return;
-		await sql`update users set bse_verified = ${on} where id = ${id}::bigint`;
+		const already = on ? !!u.bse_verified_type : !u.bse_verified_type && u.bse_verified !== true;
+		if (already && (on ? u.bse_verified === true : u.bse_verified === false)) return;
+		if (on) await sql`update users set bse_verified = true, bse_verified_type = coalesce(bse_verified_type, 'blue') where id = ${id}::bigint`;
+		else await sql`update users set bse_verified = false, bse_verified_type = null where id = ${id}::bigint`;
 		await log((on ? "VERIFIED @" : "UNVERIFIED @") + u.screen_name, v);
 	},
 };
@@ -641,13 +642,12 @@ async function adminData() {
 	const [accounts, logs] = await Promise.all([
 		// BSE accounts staff can verify: BSE-only users, founders, and anyone who has traded
 		sql`select u.id::text, u.screen_name, coalesce(nullif(u.bse_name, ''), u.name) as name, u.bse_only,
-			case when u.bse_verified is true then 'blue' when u.bse_verified is false then null when u.bse_only then l.verified_type else u.verified_type end as badge,
-			(u.bse_verified is true or (u.bse_verified is null and coalesce(case when u.bse_only then l.verified_type else u.verified_type end, '') <> '')) as verified,
+			u.bse_verified_type as badge,
+			(u.bse_verified_type is not null) as verified,
 			coalesce(w.balance_cents, 0)::float8 / 100 as cash, (extract(epoch from coalesce(i.first, u.created_at)) * 1000)::float8 as created,
 			(select count(*)::int from market_holdings h where h.user_id = u.id) as positions,
 			(select coalesce(sum(h.qty * c.price::float8), 0)::float8 from market_holdings h join market_companies c on c.id = h.company_id where h.user_id = u.id) as equity
 			from users u
-			left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null
 			left join money_wallets w on w.user_id = u.id
 			left join (select user_id, min(created_at) as first from market_txns group by user_id) i on i.user_id = u.id
 			where u.deactivated_at is null
@@ -1253,9 +1253,9 @@ button.danger:hover{background:#fdecec}
 const AUTH_NAV = `<nav class="hnav" aria-label="Primary"><a href="/markets">Listings</a><a href="/portfolio">Trading</a><a href="/overview">Market Data</a><a href="/developers">Developers</a></nav>`;
 async function accountMe(viewer: Viewer): Promise<{ name: string; avatar: string; sq: boolean }> {
 	const [u] = await sql`select coalesce(nullif(u.bse_name, ''), u.name) as name,
-		coalesce(u.bse_avatar_url, u.discord_avatar, case when u.bse_only then l.avatar_url else u.avatar_url end) as avatar_url,
-		case when u.bse_verified is true then 'blue' when u.bse_verified is false then null when u.bse_only then l.verified_type else u.verified_type end as badge
-		from users u left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null
+		u.bse_avatar_url as avatar_url,
+		u.bse_verified_type as badge
+		from users u
 		where u.id = ${viewer.id}::bigint`;
 	return { name: u?.name ?? viewer.screen_name, avatar: pfpOf(u?.avatar_url), sq: squareBadge(u?.badge) };
 }
@@ -1305,7 +1305,7 @@ async function loginPage(req: Request, opts: { next: string; error?: string; sta
 <label><span>Password</span><input name="password" type="password" autocomplete="current-password" maxlength="1024" required></label>`;
 	const q = `?next=${encodeURIComponent(next)}`;
 	const main = `<h1>${twoFactor ? "Enter your verification code" : `Sign in to ${esc(BSE_SHORT)}`}</h1>
-<p class="note">${twoFactor ? `Open your authenticator app and enter the code for ${esc(inst)}, or use a backup code.` : `Use your BSE account. If you've always traded with your ${esc(inst)} account, its username and password still work here.`}</p>
+<p class="note">${twoFactor ? `Open your authenticator app and enter the code for ${esc(inst)}, or use a backup code.` : `Use your BSE handle and password. If you've always signed in with that handle, it still works here.`}</p>
 ${opts.error ? `<p class="error" role="alert">${esc(opts.error)}</p>` : ""}
 <form method="post" action="/login" autocomplete="on">
 <input type="hidden" name="csrf" value="${esc(csrf)}">
@@ -1331,7 +1331,7 @@ ${opts.error ? `<p class="error" role="alert">${esc(opts.error)}</p>` : ""}
 <input type="hidden" name="csrf" value="${esc(csrf)}">
 <input type="hidden" name="next" value="${esc(opts.next)}">
 <label><span>Name</span><input name="name" value="${esc(opts.typed?.name ?? "")}" autocomplete="name" maxlength="${NAME_MAX}" required autofocus aria-describedby="nm-help"><small id="nm-help">Shown on your portfolio, companies and trades.</small></label>
-<label><span>Handle</span><span class="at"><b>@</b><input name="username" value="${esc(opts.typed?.username ?? "")}" autocomplete="username" autocapitalize="off" spellcheck="false" minlength="3" maxlength="15" pattern="@?[A-Za-z0-9_]{3,15}" required aria-describedby="un-help"></span><small id="un-help">3–15 letters, digits or underscores; you sign in with it. Handles are shared with ${esc(inst)}, so one that's taken there can't be used.</small></label>
+<label><span>Handle</span><span class="at"><b>@</b><input name="username" value="${esc(opts.typed?.username ?? "")}" autocomplete="username" autocapitalize="off" spellcheck="false" minlength="3" maxlength="15" pattern="@?[A-Za-z0-9_]{3,15}" required aria-describedby="un-help"></span><small id="un-help">3–15 letters, digits or underscores; you sign in with it. A handle that's already taken can't be used.</small></label>
 <label><span>Password</span><input name="password" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
 <label><span>Confirm password</span><input name="password2" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
 <p class="note small">A BSE account has no email, so a forgotten password can't be reset by email. You can add another way to sign in later in account settings.</p>
@@ -1398,7 +1398,14 @@ function oauthCookie(payload: string): string {
 }
 const urlRandom = (n: number) => randomBytes(n).toString("base64url");
 const challengeFor = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
+async function bseAuthRetired(req: Request): Promise<Response> {
+	return loginPage(req, {
+		next: "/",
+		error: "Sign in with your BSE handle and password, or with Discord. Signing in through Bloxburg Social is no longer available.",
+	});
+}
 async function bseAuthStart(req: Request, viewer: Viewer | undefined): Promise<Response> {
+	return bseAuthRetired(req);
 	const url = new URL(req.url);
 	const link = url.searchParams.has("link");
 	const next = link ? "/account" : bseNext(url.searchParams.get("next"));
@@ -1442,24 +1449,18 @@ const ACCOUNT_NOTES: Record<string, [string, boolean]> = {
 	picbad: ["That image couldn't be used.", true],
 };
 async function accountPage(req: Request, viewer: Viewer, error = ""): Promise<Response> {
-	const inst = settings().instance_name;
-	const [u] = await sql`select u.screen_name, u.name, u.avatar_url, u.bse_only, u.created_at, u.bse_linked_at, u.discord_id, u.discord_avatar, u.discord_linked_at, u.bse_passwordless,
-			u.bse_avatar_url, u.bse_banner_url, u.bse_bio, u.bse_name, u.verified_type,
-			l.screen_name as l_handle, l.name as l_name, l.avatar_url as l_avatar, l.verified_type as l_badge
-		from users u left join users l on l.id = u.bse_link_id where u.id = ${viewer.id}::bigint`;
+	const [u] = await sql`select u.screen_name, u.name, u.bse_only, u.discord_id, u.discord_avatar, u.discord_linked_at, u.bse_passwordless,
+			u.bse_avatar_url, u.bse_banner_url, u.bse_bio, u.bse_name, u.bse_verified_type
+		from users u where u.id = ${viewer.id}::bigint`;
 	const m = ACCOUNT_NOTES[new URL(req.url).searchParams.get("m") ?? ""];
 	const note = error ? `<p class="error" role="alert">${esc(error)}</p>` : m ? `<p class="${m[1] ? "error" : "ok"}" role="status">${esc(m[0])}</p>` : "";
-	const check = (t: string | null) => {
-		const at = artType(t), src = at && art(at);
-		return src ? `<img class="ck" src="${esc(src)}" alt="${t === "business" ? "Verified organization" : t === "blue" ? "Verified account" : "Government account"}">` : "";
-	};
 	const csrfIn = `<input type="hidden" name="csrf" value="${esc(viewer.csrf)}">`;
 	const display = String(u.bse_name || u.name);
-	const pic = pfpOf(u.bse_avatar_url || u.discord_avatar || (u.bse_only ? u.l_avatar : u.avatar_url));
-	const sq = squareBadge(u.bse_only ? u.l_badge : u.verified_type);
+	const pic = pfpOf(u.bse_avatar_url);
+	const sq = squareBadge(u.bse_verified_type);
 	const banner = u.bse_banner_url as string | null;
 	const profile = `<h2>Profile</h2>
-${u.bse_only ? "" : `<p class="note">This is your BSE profile. It doesn't change your ${esc(inst)} profile unless you edit that on ${esc(inst)}.</p>`}
+<p class="note">This is your BSE profile.</p>
 ${banner ? `<div class="banner-edit"><img class="ban" src="${esc(banner)}" alt=""></div>` : ""}
 <div class="pfp-edit"><img class="hero${sq ? " sq" : ""}" src="${esc(pic)}" alt="">
 <div class="col">
@@ -1467,7 +1468,7 @@ ${banner ? `<div class="banner-edit"><img class="ban" src="${esc(banner)}" alt="
 <label class="file"><span>Profile picture</span><input type="file" name="avatar" accept="image/png,image/jpeg,image/gif,image/webp" required></label>
 <button type="submit" class="sm">Upload picture</button>
 </form>
-${u.bse_avatar_url ? `<form method="post" action="/account/avatar" style="margin-top:8px">${csrfIn}<input type="hidden" name="remove" value="1"><button type="submit" class="sm alt">Remove picture</button></form>` : `<p class="note" style="margin:8px 0 0">PNG, JPEG, GIF or WebP, under 2 MB.${u.discord_avatar || (u.bse_only && u.l_avatar) || (!u.bse_only && u.avatar_url) ? " Until you set one, a linked or social picture is used." : ""}</p>`}
+${u.bse_avatar_url ? `<form method="post" action="/account/avatar" style="margin-top:8px">${csrfIn}<input type="hidden" name="remove" value="1"><button type="submit" class="sm alt">Remove picture</button></form>` : `<p class="note" style="margin:8px 0 0">PNG, JPEG, GIF or WebP, under 2 MB.</p>`}
 </div></div>
 <form method="post" action="/account/banner" enctype="multipart/form-data">${csrfIn}
 <label class="file"><span>Banner</span><input type="file" name="banner" accept="image/png,image/jpeg,image/gif,image/webp" required></label>
@@ -1476,23 +1477,17 @@ ${banner ? `</form><form method="post" action="/account/banner" style="margin-to
 </form>
 <form method="post" action="/account/profile">${csrfIn}
 <label><span>Display name</span><input name="name" value="${esc(display)}" maxlength="${NAME_MAX}" required></label>
-${u.bse_only ? `<label><span>Handle</span><span class="at"><b>@</b><input name="username" value="${esc(u.screen_name)}" autocomplete="username" autocapitalize="off" spellcheck="false" minlength="3" maxlength="15" pattern="@?[A-Za-z0-9_]{3,15}" required></span><small>3–15 letters, digits or underscores. Handles are shared with ${esc(inst)}, so one that's taken there can't be used. You can change it a few times a day.</small></label>` : `<p class="note">Handle <b>@${esc(u.screen_name)}</b> · ${esc(inst)} account. Change it on ${esc(inst)} if you want to.</p>`}
+${u.bse_only ? `<label><span>Handle</span><span class="at"><b>@</b><input name="username" value="${esc(u.screen_name)}" autocomplete="username" autocapitalize="off" spellcheck="false" minlength="3" maxlength="15" pattern="@?[A-Za-z0-9_]{3,15}" required></span><small>3–15 letters, digits or underscores. A handle that's already taken can't be used. You can change it a few times a day.</small></label>` : `<p class="note">Handle <b>@${esc(u.screen_name)}</b> · this is the name you sign in with.</p>`}
 <label><span>Bio</span><textarea name="bio" maxlength="160" placeholder="A line about you, shown on your account.">${esc(u.bse_bio || "")}</textarea></label>
 <button type="submit">Save profile</button>
 </form>`;
-	const linked = u.l_handle
-		? `<div class="conn"><div class="linked" style="margin:0"><img src="${esc(pfpOf(u.l_avatar))}" alt="" class="${squareBadge(u.l_badge) ? "sq" : ""}"><div><b>${esc(u.l_name)}</b>${check(u.l_badge)}<div class="note">@${esc(u.l_handle)} · linked ${esc(new Date(u.bse_linked_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }))}. You can sign in with this ${esc(inst)} account. Balances stay separate.</div></div></div>
-<form method="post" action="/account/unlink">${csrfIn}<button type="submit" class="sm alt">Unlink</button></form></div>`
-		: `<div class="conn"><div><b>${esc(inst)}</b><div class="note">Optional. Lets you sign in with that account. Balances stay separate.</div></div><a class="btn sm" href="/auth/bs?link=1">Link</a></div>`;
 	const discordBlock = u.discord_id
 		? `<div class="conn"><div class="linked dc" style="margin:0"><img src="${esc(u.discord_avatar || DEFAULT_PFP)}" alt=""><div><b>Discord</b><div class="note">Linked ${esc(new Date(u.discord_linked_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }))}. "Sign in with Discord" signs in to this account.</div></div></div>
 <form method="post" action="/account/discord/unlink">${csrfIn}<button type="submit" class="sm alt">Unlink</button></form></div>`
 		: `<div class="conn"><div><b>Discord</b><div class="note">Optional. Only your Discord name and picture are read.</div></div><a class="btn sm discord" href="/auth/discord/start?link=1" style="margin-top:0">${DISCORD_MARK}Link</a></div>`;
 	const passwordForm = `<h2>Password</h2><p class="note">This account was made with Discord and has no password. Add one to also sign in with your handle.</p>
 <form method="post" action="/account/password">${csrfIn}<label><span>Password</span><input class="pw" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label><label><span>Confirm password</span><input class="pw" name="password2" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label><button type="submit">Save password</button></form>`;
-	const connected = u.bse_only
-		? `<h2>Connected accounts</h2>${discordOn() || u.discord_id ? discordBlock : ""}${linked}`
-		: `<h2>This account</h2><p class="note">You sign in to ${esc(BSE_SHORT)} with your ${esc(inst)} account. Your balance, holdings and companies stay tied to it. Password changes happen on <a href="${esc(PUBLIC_ORIGIN)}/settings/account">${esc(inst)}</a>.</p>`;
+	const connected = (discordOn() || u.discord_id) ? `<h2>Connected accounts</h2>${discordBlock}` : "";
 	const apps = connectedAppsHtml(await connectedApps(viewer.id), viewer, devDeps("", viewer));
 	const main = `<h1>Your account</h1>${note}${profile}${connected}${u.bse_passwordless ? passwordForm : ""}${apps}
 <p class="links"><a href="/portfolio">Portfolio</a><a href="/logout">Sign out</a></p>`;
@@ -1572,7 +1567,7 @@ async function bseAccountRoute(req: Request, viewer: Viewer | undefined, p: stri
 	// way is unlinked, one other way to sign in has to be left
 	if (p === "/account/discord/unlink") {
 		const done = await sql`update users set discord_id = null, discord_avatar = null, discord_linked_at = null where id = ${viewer.id}::bigint and bse_only and discord_id is not null
-			and (not bse_passwordless or bse_link_id is not null) returning id`;
+			and not bse_passwordless returning id`;
 		if (!done.length) return Response.redirect("/account?m=lastway", 303);
 		changed++;
 		return Response.redirect("/account?m=dunlinked", 303);
@@ -1777,6 +1772,7 @@ async function discordCallback(req: Request): Promise<Response> {
 // back from Bloxburg Social: sign in (to the BSE account linked to it, or the
 // social account itself, as before), or link it to the signed-in BSE account
 async function bseAuthCallback(req: Request): Promise<Response> {
+	return bseAuthRetired(req);
 	const url = new URL(req.url);
 	const nextGuess = bseNext(url.searchParams.get("next"));
 	let stored: { state?: string; verifier?: string; next?: string; redirect?: string; mode?: string; uid?: string | null } | undefined;

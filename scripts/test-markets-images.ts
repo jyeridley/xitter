@@ -7,14 +7,12 @@ const PNG = Buffer.from(
 	"base64",
 );
 
-test("avatar fallbacks: BSE pfp, then Discord, then linked or social, then none", () => {
+test("avatarUrl uses only the BSE-owned picture", () => {
 	expect(avatarUrl({ bse_avatar_url: "/media/1", discord_avatar: "https://cdn.discordapp.com/a.png", link_avatar: "/media/2", avatar_url: "/media/3", bse_only: true })).toBe("/media/1");
-	expect(avatarUrl({ discord_avatar: "https://cdn.discordapp.com/a.png", link_avatar: "/media/2", bse_only: true })).toBe("https://cdn.discordapp.com/a.png");
-	expect(avatarUrl({ link_avatar: "/media/2", avatar_url: "/media/3", bse_only: true })).toBe("/media/2");
-	expect(avatarUrl({ link_avatar: "/media/2", avatar_url: "/media/3", bse_only: false })).toBe("/media/3");
+	expect(avatarUrl({ discord_avatar: "https://cdn.discordapp.com/a.png", link_avatar: "/media/2", bse_only: true })).toBeNull();
+	expect(avatarUrl({ link_avatar: "/media/2", avatar_url: "/media/3", bse_only: false })).toBeNull();
 	expect(avatarUrl({ bse_only: true })).toBeNull();
-	expect(avatarUrl({ avatar_url: "/media/3", bse_only: false })).toBe("/media/3");
-});
+})
 
 test("a company image is only its own logo, never a person's picture", () => {
 	expect(companyImage("/i/markets/logo/1?v=2")).toBe("/i/markets/logo/1?v=2");

@@ -115,23 +115,23 @@ try {
 	const acc = (vUserBody.admin?.accounts ?? []).find((a: any) => a.screen_name === userHandle);
 	ok(acc?.verified === true && acc?.badge === "blue", "user shows as verified on BSE", acc);
 	ok((vUserBody.admin?.logs ?? []).some((l: any) => String(l.a).includes("VERIFIED @" + userHandle)), "verified user is logged");
-	const [afterOn] = await db`select verified_type, bse_verified from users where screen_name = ${userHandle}`;
-	ok(afterOn.bse_verified === true && afterOn.verified_type == null, "bse_verified set; social verified_type untouched");
+	const [afterOn] = await db`select verified_type, bse_verified, bse_verified_type from users where screen_name = ${userHandle}`;
+	ok(afterOn.bse_verified === true && afterOn.bse_verified_type === "blue" && afterOn.verified_type == null, "bse check set; social verified_type untouched");
 
-	// inherit: a social-style badge still shows when bse_verified is left null
-	await db`update users set bse_only = false, bse_verified = null, verified_type = 'business' where screen_name = ${userHandle}`;
+	// a stored BSE checkmark type (e.g. gold) is what the exchange shows
+	await db`update users set bse_verified = true, bse_verified_type = 'business', verified_type = 'blue' where screen_name = ${userHandle}`;
 	await db`insert into market_accounts (user_id) values (${user.id}::bigint) on conflict (user_id) do nothing`;
-	const inherit = await req("/i/markets/api/admin", { method: "GET", jar: adminJar });
-	const inheritBody = await inherit.json();
-	const accI = (inheritBody.accounts ?? []).find((a: any) => a.screen_name === userHandle);
-	ok(accI?.verified === true && accI?.badge === "business", "null bse_verified inherits the existing badge", accI);
+	const stored = await req("/i/markets/api/admin", { method: "GET", jar: adminJar });
+	const storedBody = await stored.json();
+	const accI = (storedBody.accounts ?? []).find((a: any) => a.screen_name === userHandle);
+	ok(accI?.verified === true && accI?.badge === "business", "BSE shows the stored BSE checkmark type", accI);
 
 	const hide = await req("/i/markets/api/admin/verifyUser", { method: "POST", jar: adminJar, csrf, json: { id: user.id, on: false } });
 	const hideBody = await hide.json();
 	const accH = (hideBody.admin?.accounts ?? []).find((a: any) => a.screen_name === userHandle);
 	ok(accH?.verified === false && !accH?.badge, "unverify hides the tick on BSE", accH);
-	const [afterOff] = await db`select verified_type, bse_verified from users where screen_name = ${userHandle}`;
-	ok(afterOff.bse_verified === false && afterOff.verified_type === "business", "unverify does not clear the social badge");
+	const [afterOff] = await db`select verified_type, bse_verified, bse_verified_type from users where screen_name = ${userHandle}`;
+	ok(afterOff.bse_verified === false && afterOff.bse_verified_type == null && afterOff.verified_type === "blue", "unverify does not clear the social badge");
 
 	const adminPage = await (await req("/admin", { jar: adminJar })).text();
 	ok(adminPage.includes("data-a=verifyCo") && adminPage.includes("data-a=verifyUser"), "admin page has verify controls");

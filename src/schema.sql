@@ -2174,3 +2174,14 @@ end $$;
 -- exchange without writing users.verified_type (the social badge). null
 -- inherits the current social or linked badge, so existing ticks stay put.
 alter table users add column if not exists bse_verified boolean;
+
+-- a BSE-owned checkmark type. A one-time snapshot (markets-snapshot.ts) copies
+-- the tick that was showing from a social or linked badge; after that, BSE
+-- display never reads users.verified_type.
+alter table users add column if not exists bse_verified_type text;
+do $$ begin
+	if not exists (select 1 from pg_constraint where conname = 'users_bse_verified_type_check') then
+		alter table users add constraint users_bse_verified_type_check
+			check (bse_verified_type is null or bse_verified_type in ('blue', 'business', 'government', 'government_individual'));
+	end if;
+end $$;

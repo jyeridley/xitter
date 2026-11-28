@@ -359,8 +359,8 @@ async function apiRoute(req: Request, p: string, d: Deps): Promise<Response> {
 		const denied = need("read");
 		if (denied) return denied;
 		const cents = await balanceOf(token!.user_id);
-				const [av] = await sql`select coalesce(u.bse_avatar_url, u.discord_avatar, case when u.bse_only then l.avatar_url else u.avatar_url end) as avatar, coalesce(nullif(u.bse_name, ''), u.name) as name
-			from users u left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null where u.id = ${token!.user_id}::bigint`;
+				const [av] = await sql`select u.bse_avatar_url as avatar, coalesce(nullif(u.bse_name, ''), u.name) as name
+			from users u where u.id = ${token!.user_id}::bigint`;
 		const origin = requestOrigin(req);
 		const avatar = av?.avatar ? (String(av.avatar).startsWith("http") ? av.avatar : origin + (String(av.avatar).startsWith("/media/") && !String(av.avatar).includes("banner") && /^\/media\/(\d{1,19})$/.test(av.avatar) ? `/profile_images/${/^\/media\/(\d{1,19})$/.exec(av.avatar)![1]}_x96.jpg` : av.avatar)) : `${origin}/abs/sticky/default_profile_images/default_profile_normal.png`;
 		return ok({ id: token!.user_id, handle: token!.handle, name: av?.name ?? token!.name, avatar, cash: cents / 100, cash_cents: cents, scope: token!.scopes, app: token!.app_name });
