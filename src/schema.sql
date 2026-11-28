@@ -2139,3 +2139,17 @@ create index if not exists bse_tokens_app on bse_tokens (app_id);
 -- which app placed a trade (null: the website)
 alter table market_txns add column if not exists app_id bigint references bse_apps (id) on delete set null;
 alter table market_txns add column if not exists app_name text;
+
+-- BSE profile: a picture, banner, bio and display name that live on the
+-- exchange. They never overwrite a Bloxburg Social profile; a social account
+-- signed in here can set these as an override, and a BSE-only account uses
+-- them as its profile (display name is also kept in users.name).
+alter table users add column if not exists bse_avatar_url text;
+alter table users add column if not exists bse_banner_url text;
+alter table users add column if not exists bse_bio text not null default '';
+alter table users add column if not exists bse_name text;
+
+-- a developer's app can have its own logo, independent of their profile picture
+alter table bse_apps add column if not exists logo bytea;
+alter table bse_apps add column if not exists logo_type text;
+alter table bse_apps add column if not exists logo_v int not null default 0;

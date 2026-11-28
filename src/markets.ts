@@ -36,6 +36,8 @@ import { GUEST_ID } from "./blocks";
 import { art, artType } from "./verified-art";
 import { acceptDisclaimer, balanceOf, disclaimerAccepted, disclaimerText, economy } from "./money";
 import { PRICE_FLOOR, MAX_PRICE, clampPrice, impactOf } from "./markets-price";
+import { ImageError, companyImage, imageFrom, storeAccountPhoto, removeStoredPhoto } from "./markets-images";
+import { changeUsername } from "./account-settings";
 import { hit, limitedResponse } from "./ratelimit";
 import { DevError, connectedApps, connectedAppsHtml, devRoute, revokeFromAccount, type Deps as DevDeps, type TradeResult } from "./markets-dev";
 import { NAME_MAX, feature, hasBlockedPhrase, settings } from "./settings";
@@ -232,12 +234,12 @@ let cache: { key: number; at: number; value: Promise<Shared> } | undefined;
 async function loadShared(): Promise<Shared> {
 	// who holds each company and its latest trades, public on its page: a BSE-only
 	// account shows its linked social account's picture and checkmark
-	const PERSON = sql`u.screen_name as handle, u.name, u.bse_only, case when u.bse_only then l.verified_type else u.verified_type end as badge,
-		case when u.bse_only then coalesce(l.avatar_url, u.discord_avatar) else u.avatar_url end as avatar, l.screen_name as link`;
+	const PERSON = sql`u.screen_name as handle, coalesce(nullif(u.bse_name, ''), u.name) as name, u.bse_only, case when u.bse_only then l.verified_type else u.verified_type end as badge,
+		coalesce(u.bse_avatar_url, u.discord_avatar, case when u.bse_only then l.avatar_url else u.avatar_url end) as avatar, l.screen_name as link`;
 	const [rows, hist, index, headlines, events, gap, holders, trades] = await Promise.all([
 		sql`select c.id::text, c.name, c.ticker, c.logo_v, c.logo is not null as has_logo, c.price::float8, c.prev_close::float8, c.shares::float8, c.volume::float8, (extract(epoch from c.listed_at) * 1000)::float8 as listed, c.suspended,
-			coalesce(c.sector, '') as sector, coalesce(c.description, '') as description, u.id::text as owner_id, u.screen_name as owner_handle, u.name as owner_name, u.bse_only as owner_bse, l.screen_name as owner_link,
-			case when u.bse_only then l.verified_type else u.verified_type end as owner_badge, case when u.bse_only then coalesce(l.avatar_url, u.discord_avatar) else u.avatar_url end as owner_avatar
+			coalesce(c.sector, '') as sector, coalesce(c.description, '') as description, u.id::text as owner_id, u.screen_name as owner_handle, coalesce(nullif(u.bse_name, ''), u.name) as owner_name, u.bse_only as owner_bse, l.screen_name as owner_link,
+			case when u.bse_only then l.verified_type else u.verified_type end as owner_badge, coalesce(u.bse_avatar_url, u.discord_avatar, case when u.bse_only then l.avatar_url else u.avatar_url end) as owner_avatar
 			from market_companies c left join users u on u.id = c.owner_id and u.status <> 'suspended' and u.deactivated_at is null
 			left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null order by c.id`,
 		sql`select company_id::text as c, (extract(epoch from t) * 1000)::float8 as t, price::float8 as p from (select company_id, t, price, id, row_number() over (partition by company_id order by id desc) rn from market_history) x where rn <= ${HIST_SENT} order by company_id, id`,
@@ -250,9 +252,10 @@ async function loadShared(): Promise<Shared> {
 				from market_holdings h where qty > 0 and exists (select 1 from users v where v.id = h.user_id and v.status <> 'suspended' and v.deactivated_at is null)) x
 			join users u on u.id = x.user_id left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null
 			where x.rn <= 25 order by x.c, x.qty desc`,
-		sql`select x.ticker, x.side, x.qty, x.price::float8 as price, (extract(epoch from x.created_at) * 1000)::float8 as t, ${PERSON}
-			from (select ticker, side, qty, price, created_at, user_id, row_number() over (partition by ticker order by id desc) as rn from market_txns where created_at > now() - interval '30 days') x
+		sql`select x.ticker, x.side, x.qty, x.price::float8 as price, (extract(epoch from x.created_at) * 1000)::float8 as t, x.app_name, x.app_id, a.logo_v, a.logo is not null as has_app_logo, ${PERSON}
+			from (select ticker, side, qty, price, created_at, user_id, app_id, app_name, row_number() over (partition by ticker order by id desc) as rn from market_txns where created_at > now() - interval '30 days') x
 			join users u on u.id = x.user_id left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null
+			left join bse_apps a on a.id = x.app_id
 			where x.rn <= 15 and u.status <> 'suspended' and u.deactivated_at is null order by x.ticker, x.created_at desc`,
 	]);
 	const person = (r: any) => ({ handle: r.handle, name: r.name, bse: !!r.bse_only, link: r.link ?? null, badge: r.badge ?? null, avatar: pfpOf(r.avatar), sq: squareBadge(r.badge) });
@@ -262,17 +265,16 @@ async function loadShared(): Promise<Shared> {
 		e.list.push({ ...person(r), qty: r.qty });
 	}
 	const tradesBy = new Map<string, any[]>();
-	for (const r of trades) (tradesBy.get(r.ticker) ?? tradesBy.set(r.ticker, []).get(r.ticker)!).push({ ...person(r), side: r.side, qty: r.qty, price: r.price, t: r.t });
+	for (const r of trades) (tradesBy.get(r.ticker) ?? tradesBy.set(r.ticker, []).get(r.ticker)!).push({ ...person(r), side: r.side, qty: r.qty, price: r.price, t: r.t, app: r.app_name ? { name: r.app_name, logo: r.has_app_logo ? `${MARKETS_PATH}/app-logo/${r.app_id}?v=${r.logo_v}` : "" } : null });
 	const byCo = new Map<string, [number, number][]>();
 	for (const h of hist) (byCo.get(h.c) ?? byCo.set(h.c, []).get(h.c)!).push([h.t, h.p]);
 	return {
 		companies: rows.map((c: any) => {
 			const logo = c.has_logo ? `${MARKETS_PATH}/logo/${c.id}?v=${c.logo_v}` : "";
 			const owner: Owner | null = c.owner_id ? { id: c.owner_id, handle: c.owner_handle, name: c.owner_name, bse: !!c.owner_bse, link: c.owner_link ?? null, badge: c.owner_badge ?? null, avatar: pfpOf(c.owner_avatar), custom: !!c.owner_avatar, sq: squareBadge(c.owner_badge) } : null;
-			// the founder's own picture first, then an uploaded logo, then the founder's default one; none at all draws the ticker
-			const img = owner?.custom ? owner.avatar : logo || owner?.avatar || "";
+			// the company's own logo only; the founder's picture sits next to their name, never as the stock
 			return {
-			id: c.id, name: c.name, ticker: c.ticker, logo, img, sq: owner ? owner.sq : !!logo,
+			id: c.id, name: c.name, ticker: c.ticker, logo, img: companyImage(logo), sq: true,
 			price: c.price, prevClose: c.prev_close, shares: c.shares, volume: c.volume, listed: c.listed, suspended: c.suspended,
 			sector: c.sector, description: c.description,
 			owner,
@@ -302,8 +304,8 @@ function shared(): Promise<Shared> {
 async function account(viewer: Viewer) {
 	const on = moneyOn();
 	const [[u], holdings, txns, [owned]] = await Promise.all([
-		sql`select u.status, u.name, u.bse_only, case when u.bse_only then l.verified_type else u.verified_type end as verified_type,
-			case when u.bse_only then coalesce(l.avatar_url, u.discord_avatar) else u.avatar_url end as avatar_url, l.screen_name as link_handle
+		sql`select u.status, coalesce(nullif(u.bse_name, ''), u.name) as name, u.bse_only, case when u.bse_only then l.verified_type else u.verified_type end as verified_type,
+			coalesce(u.bse_avatar_url, u.discord_avatar, case when u.bse_only then l.avatar_url else u.avatar_url end) as avatar_url, l.screen_name as link_handle
 			from users u left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null where u.id = ${viewer.id}`,
 		sql`select company_id::text as id, qty, cost from market_holdings where user_id = ${viewer.id}`,
 		sql`select side, ticker, qty, price::float8, coalesce(total_cents::float8 / 100, total::float8) as total, (extract(epoch from created_at) * 1000)::float8 as t from market_txns where user_id = ${viewer.id} order by id desc limit 100`,
@@ -424,13 +426,16 @@ async function register(viewer: Viewer, b: any) {
 	if (!(price >= PRICE_FLOOR && price <= 1000)) throw new Refusal("The starting price is between $100 and $1,000");
 	if (!(sh >= 1000 && sh <= 10_000_000)) throw new Refusal("Shares outstanding are between 1,000 and 10,000,000");
 	const p = clampPrice(Math.round(price * 100) / 100);
+	let logo: { bytes: Buffer; type: string } | undefined;
+	try { const im = await imageFrom(b.logo, "logo"); if (im) logo = { bytes: im.bytes, type: im.type }; }
+	catch (e) { if (e instanceof ImageError) throw new Refusal(e.message); throw e; }
 	await sql.begin(async (tx) => {
 		// one account's listings counted under a lock of its own, so two at once can't both fit
 		await tx`select pg_advisory_xact_lock(hashtext(${`market-list:${viewer.id}`}))`;
 		const [n] = await tx`select count(*)::int as n from market_companies where owner_id = ${viewer.id}`;
 		if (n.n >= OWN_MAX) throw new Refusal(`You can list up to ${OWN_MAX} companies`);
-		const [c] = await tx`insert into market_companies (name, ticker, price, prev_close, shares, owner_id, sector, description)
-			values (${name}, ${tk}, ${p}, ${p}, ${sh}, ${viewer.id}, ${sector}, ${description}) on conflict (ticker) do nothing returning id`;
+		const [c] = await tx`insert into market_companies (name, ticker, price, prev_close, shares, owner_id, sector, description, logo, logo_type)
+			values (${name}, ${tk}, ${p}, ${p}, ${sh}, ${viewer.id}, ${sector}, ${description}, ${logo?.bytes ?? null}, ${logo?.type ?? null}) on conflict (ticker) do nothing returning id`;
 		if (!c) throw new Refusal("That ticker is taken");
 		await listedWithHistory(tx, c.id, p, name, tk);
 	});
@@ -445,13 +450,18 @@ async function editCompany(viewer: Viewer, b: any) {
 	const sector = SECTORS.includes(b.sector) ? b.sector : null;
 	if ([...name].length < 2) throw new Refusal("Give the company a name");
 	if (!sector) throw new Refusal("Choose a sector");
-	await sql`update market_companies set name = ${name}, sector = ${sector}, description = ${description} where id = ${c.id}`;
+	let logo: { bytes: Buffer; type: string } | undefined;
+	try { const im = await imageFrom(b.logo, "logo"); if (im) logo = { bytes: im.bytes, type: im.type }; }
+	catch (e) { if (e instanceof ImageError) throw new Refusal(e.message); throw e; }
+	if (logo) await sql`update market_companies set name = ${name}, sector = ${sector}, description = ${description}, logo = ${logo.bytes}, logo_type = ${logo.type}, logo_v = logo_v + 1 where id = ${c.id}`;
+	else if (b.clear_logo || b.logo === "") await sql`update market_companies set name = ${name}, sector = ${sector}, description = ${description}, logo = null, logo_type = null, logo_v = logo_v + 1 where id = ${c.id}`;
+	else await sql`update market_companies set name = ${name}, sector = ${sector}, description = ${description} where id = ${c.id}`;
 	await log(`EDITED ${c.ticker}`, viewer);
 }
 
 // ---------- staff ----------
 
-// staff can tie any company to an account by @handle, so it wears that account's picture and checkmark;
+// staff can tie any company to an account by @handle, so it shows that account as its founder (name and checkmark);
 // undefined leaves it as it is, an empty one unlinks it
 async function ownerOf(v: unknown): Promise<string | null | undefined> {
 	if (v === undefined || v === null) return undefined;
@@ -463,13 +473,14 @@ async function ownerOf(v: unknown): Promise<string | null | undefined> {
 	return u.id;
 }
 
-function logoOf(v: unknown): { bytes: Buffer; type: string } | null | undefined {
-	if (v === undefined || v === null || v === "") return undefined;
-	const m = /^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(v));
-	if (!m) throw new Refusal("The logo must be a PNG, JPEG, GIF or WebP image");
-	const bytes = Buffer.from(m[2], "base64");
-	if (bytes.length > MAX_LOGO) throw new Refusal("The logo must be under 1 MB");
-	return { bytes, type: m[1] };
+async function logoOf(v: unknown): Promise<{ bytes: Buffer; type: string } | undefined> {
+	try {
+		const im = await imageFrom(v, "logo");
+		return im ? { bytes: im.bytes, type: im.type } : undefined;
+	} catch (e) {
+		if (e instanceof ImageError) throw new Refusal(e.message);
+		throw e;
+	}
 }
 const tickerOf = (v: unknown) => String(v ?? "").trim().toUpperCase().slice(0, 6);
 const idOf = (v: unknown) => String(v ?? "").replace(/\D/g, "").slice(0, 19) || "0";
@@ -487,7 +498,7 @@ const ADMIN: Record<string, (b: any, v: Viewer) => Promise<unknown>> = {
 		const name = String(b.name ?? "").trim().slice(0, 80), tk = tickerOf(b.ticker), price = Number(b.price), sh = Math.floor(Number(b.shares));
 		if (!name || !tk || !(price >= PRICE_FLOOR) || !(sh > 0)) throw new Refusal("Enter name, ticker, a price of at least $100, and shares");
 		if (price > 1e12 || sh > 1e15) throw new Refusal("That's too big a number");
-		const logo = logoOf(b.logo);
+		const logo = await logoOf(b.logo);
 		const p = clampPrice(Math.round(price * 100) / 100);
 		const sector = SECTORS.includes(b.sector) ? b.sector : null, description = cleanText(b.description, 200) || null;
 		const owner = (await ownerOf(b.owner)) ?? null;
@@ -503,7 +514,7 @@ const ADMIN: Record<string, (b: any, v: Viewer) => Promise<unknown>> = {
 		if (!name || !tk || !(sh > 0) || sh > 1e15) throw new Refusal("Name, ticker and shares are required");
 		const [clash] = await sql`select 1 from market_companies where ticker = ${tk} and id <> ${c.id}`;
 		if (clash) throw new Refusal("Ticker in use");
-		const logo = logoOf(b.logo), owner = await ownerOf(b.owner);
+		const logo = await logoOf(b.logo), owner = await ownerOf(b.owner);
 		if (owner !== undefined) await sql`update market_companies set owner_id = ${owner} where id = ${c.id}`;
 		if (logo) await sql`update market_companies set name = ${name}, ticker = ${tk}, shares = ${sh}, logo = ${logo.bytes}, logo_type = ${logo.type}, logo_v = logo_v + 1 where id = ${c.id}`;
 		else await sql`update market_companies set name = ${name}, ticker = ${tk}, shares = ${sh} where id = ${c.id}`;
@@ -742,15 +753,9 @@ async function png(svg: string): Promise<Buffer> {
 const BLUE_CHECK = "M20.396 11c-.018-.646-.215-1.275-.57-1.816-.354-.54-.852-.972-1.438-1.246.223-.607.27-1.264.14-1.897-.131-.634-.437-1.218-.882-1.687-.47-.445-1.053-.75-1.687-.882-.633-.13-1.29-.083-1.897.14-.273-.587-.704-1.086-1.245-1.44S11.647 1.62 11 1.604c-.646.017-1.273.213-1.813.568s-.969.854-1.24 1.44c-.608-.223-1.267-.272-1.902-.14-.635.13-1.22.436-1.69.882-.445.47-.749 1.055-.878 1.688-.13.633-.08 1.29.144 1.896-.587.274-1.087.705-1.443 1.245-.356.54-.555 1.17-.574 1.817.02.647.218 1.276.574 1.817.356.54.856.972 1.443 1.245-.224.606-.274 1.263-.144 1.896.13.634.433 1.218.877 1.688.47.443 1.054.747 1.687.878.633.132 1.29.084 1.897-.136.274.586.705 1.084 1.246 1.439.54.354 1.17.551 1.816.569.647-.016 1.276-.213 1.817-.567s.972-.854 1.245-1.44c.604.239 1.266.296 1.903.164.636-.132 1.22-.447 1.68-.907.46-.46.776-1.044.908-1.681s.075-1.299-.165-1.903c.586-.274 1.084-.705 1.439-1.246.354-.54.551-1.17.569-1.816zM9.662 14.85l-3.429-3.428 1.293-1.302 2.072 2.072 4.4-4.794 1.347 1.246z";
 const GOLD_CHECK = '<linearGradient gradientUnits="userSpaceOnUse" id="oga" x1="4.411" x2="18.083" y1="2.495" y2="21.508"><stop offset="0" stop-color="#f4e72a"/><stop offset=".539" stop-color="#cd8105"/><stop offset=".68" stop-color="#cb7b00"/><stop offset="1" stop-color="#f4ec26"/><stop offset="1" stop-color="#f4e72a"/></linearGradient><linearGradient gradientUnits="userSpaceOnUse" id="ogb" x1="5.355" x2="16.361" y1="3.395" y2="19.133"><stop offset="0" stop-color="#f9e87f"/><stop offset=".406" stop-color="#e2b719"/><stop offset=".989" stop-color="#e2b719"/></linearGradient><g clip-rule="evenodd" fill-rule="evenodd"><path d="M13.324 3.848L11 1.6 8.676 3.848l-3.201-.453-.559 3.184L2.06 8.095 3.48 11l-1.42 2.904 2.856 1.516.559 3.184 3.201-.452L11 20.4l2.324-2.248 3.201.452.559-3.184 2.856-1.516L18.52 11l1.42-2.905-2.856-1.516-.559-3.184zm-7.09 7.575l3.428 3.428 5.683-6.206-1.347-1.247-4.4 4.795-2.072-2.072z" fill="url(#oga)"/><path d="M13.101 4.533L11 2.5 8.899 4.533l-2.895-.41-.505 2.88-2.583 1.37L4.2 11l-1.284 2.627 2.583 1.37.505 2.88 2.895-.41L11 19.5l2.101-2.033 2.895.41.505-2.88 2.583-1.37L17.8 11l1.284-2.627-2.583-1.37-.505-2.88zm-6.868 6.89l3.429 3.428 5.683-6.206-1.347-1.247-4.4 4.795-2.072-2.072z" fill="url(#ogb)"/><path d="M6.233 11.423l3.429 3.428 5.65-6.17.038-.033-.005 1.398-5.683 6.206-3.429-3.429-.003-1.405.005.003z" fill="#d18800"/></g>';
 const badgeSvg = (t: string | null | undefined) => (!t ? "" : t === "business" ? GOLD_CHECK : `<path fill="${t === "blue" ? "#1d9bf0" : "#829aab"}" d="${BLUE_CHECK}"/>`);
-// the company's picture for its card, as the market pages show it: the founder's, else its logo
+// the company's picture for its card: its own logo, never the founder's profile picture
 async function ogPicture(c: Company | undefined): Promise<string | null> {
 	try {
-		if (c?.owner?.custom && c.owner.avatar.startsWith("/profile_images/")) {
-			const path = c.owner.avatar.replace(/_x96\.jpg$/, "_200x200.jpg");
-			const guest = { id: GUEST_ID, screen_name: "", name: "", status: "active", role: null } as unknown as Viewer;
-			const r = await serveAvatar(new Request(PUBLIC_ORIGIN + path), path, guest);
-			if (r.ok) return `data:${r.headers.get("content-type")};base64,${Buffer.from(await r.arrayBuffer()).toString("base64")}`;
-		}
 		if (c?.logo) {
 			const [r] = await sql`select logo, logo_type from market_companies where id = ${c.id} and logo is not null`;
 			if (r) return `data:${r.logo_type};base64,${Buffer.from(r.logo).toString("base64")}`;
@@ -821,7 +826,7 @@ const pictures = new Map<string, Promise<Buffer>>();
 async function ogImage(ticker: string | null, origin: string = PUBLIC_ORIGIN): Promise<Buffer> {
 	const s = await shared();
 	const c = companyBy(s, ticker);
-	const key = `nolink:${c?.ticker ?? ""}:${origin}:${Math.floor(Date.now() / 60000)}`;
+	const key = `logoonly:${c?.ticker ?? ""}:${origin}:${Math.floor(Date.now() / 60000)}`;
 	let p = pictures.get(key);
 	if (!p) {
 		p = Promise.all([ogPicture(c), checkArt(c?.owner?.badge)]).then(([pic, check]) => png(ogSvg(s, c, pic, check, origin)));
@@ -921,7 +926,7 @@ ${face}<text x="${tx}" y="${ay + 36}" font-size="34" font-weight="700" fill="#00
 ${price}${tag}${chart}${row}${foot}
 </svg>`;
 }
-// the picture the page shows: the founder's or the logo, else the site's default one; anything else (an outside address) draws the ticker
+// the picture the page shows: the company's logo, else the ticker
 async function exportPicture(c: Company): Promise<string | null> {
 	const pic = await ogPicture(c);
 	if (pic || c.img !== DEFAULT_PFP) return pic;
@@ -937,7 +942,7 @@ async function exportImage(ticker: string | null, r: string | null, origin: stri
 	const c = companyBy(s, ticker);
 	if (!c) return null;
 	const [range, label] = RANGES[r ?? ""] ?? RANGES["90"];
-	const key = `${c.ticker}:${range}:${origin}:${Math.floor(Date.now() / 15000)}`;
+	const key = `logoonly:${c.ticker}:${range}:${origin}:${Math.floor(Date.now() / 15000)}`;
 	let p = exports_.get(key);
 	if (!p) {
 		p = Promise.all([exportPicture(c), checkArt(c.owner?.badge)]).then(([pic, check]) => png(exportSvg(c, range, label, pic, check, origin)));
@@ -1086,11 +1091,34 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid var(-
 .logo-wrap .logo-on-dark{display:none}
 .logo-wrap .logo-on-light{display:block}
 .wordmark .bname{display:none}
-.hnav{display:flex;align-items:center;gap:32px;margin-left:8px;white-space:nowrap}
+.hnav{display:flex;align-items:center;gap:22px;margin-left:8px;white-space:nowrap}
 .hnav a{color:var(--ink);font-weight:500;font-size:1.05rem;padding:6px 0;border-bottom:3px solid transparent;text-decoration:none}
 .hnav a:hover{border-bottom-color:var(--ink);text-decoration:none}
 .bsehead .grow{flex:1}
 .bsehead .glink{color:var(--mut);font-size:13px;font-weight:500;white-space:nowrap}
+.acct{position:relative;flex:0 0 auto}
+.acct>summary{list-style:none;display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px 0;color:var(--ink);font-weight:600;font-size:14px}
+.acct>summary::-webkit-details-marker{display:none}
+.acct img{width:32px;height:32px;border-radius:50%;object-fit:cover;border:1px solid var(--line);background:var(--band)}
+.acct img.sq{border-radius:6px}
+.acct summary span{white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis}
+.acctm{position:absolute;right:0;top:calc(100% + 8px);min-width:220px;background:#fff;border:1px solid #000;box-shadow:0 8px 20px rgba(0,0,0,.08);padding:8px;z-index:40}
+.acctm a{display:block;padding:10px 10px;color:var(--ink);text-decoration:none;font-weight:600;font-size:13px}
+.acctm a:hover{background:var(--band);text-decoration:none}
+.acctm .lbl{padding:4px 10px 8px;color:var(--mut);font-size:13px;font-weight:500}
+.signin{display:inline-flex;align-items:center;min-height:36px;padding:0 14px;border:2px solid #000;background:#000;color:#fff;font-weight:600;font-size:14px;text-decoration:none}
+.signin:hover{background:#222;text-decoration:none}
+.pfp-edit{display:flex;align-items:flex-start;gap:16px;margin:0 0 18px}
+.pfp-edit img.hero{width:88px;height:88px;border-radius:50%;object-fit:cover;border:1px solid var(--line);background:var(--band);flex:0 0 auto}
+.pfp-edit img.hero.sq{border-radius:8px}
+.pfp-edit .col{flex:1;min-width:0}
+.banner-edit{margin:0 0 18px}
+.banner-edit img.ban{width:100%;height:100px;object-fit:cover;background:var(--band);border:1px solid var(--line);display:block;margin-bottom:10px}
+.file input[type=file]{padding:8px 0;border:0;min-height:0;box-shadow:none;background:transparent}
+.file input[type=file]:focus{box-shadow:none;border:0}
+.app-ico{width:40px;height:40px;object-fit:cover;border:1px solid var(--line);background:var(--band);flex:0 0 auto}
+.conn{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:8px 0 14px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.conn:last-child{border-bottom:0;padding-bottom:0}
 .tape{padding:24px 32px 8px;background:#fff;overflow:hidden}
 .tick-row{display:flex;gap:16px;align-items:stretch;max-width:1240px;margin:0 auto}
 .tick-mkt{flex:none;width:140px;background:#000;color:#fff;font:600 1.05rem var(--sans);padding:0 20px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 6px 14px -6px rgba(0,0,0,.45)}
@@ -1118,6 +1146,8 @@ input:focus{outline:0;border-color:#000;box-shadow:0 0 0 3px var(--accent)}
 .error{color:var(--dn);margin:0 0 14px;font-size:14px}
 button{width:100%;min-height:48px;border:2px solid #000;border-radius:0;background:#000;color:#fff;font:600 1rem var(--sans);cursor:pointer;margin-top:4px}
 button:hover{background:#222}
+.pfp-edit button,form[action="/account/avatar"] button,form[action="/account/banner"] button,.conn .btn,.conn button{width:auto;min-width:140px}
+.pfp-edit .col button{display:inline-flex;margin:6px 8px 0 0}
 .links{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:16px 0 0;font-size:13px}
 .links a{color:var(--deep)}
 .back{margin:12px 0 0;text-align:center;font-size:13px}
@@ -1152,7 +1182,7 @@ h2{font-size:1.1rem;margin:22px 0 10px;padding-top:18px;border-top:1px solid var
 .linked .ck{width:18px;height:18px;vertical-align:-3px;margin-left:4px}
 .fine{margin:28px 0 0;text-align:center;color:var(--mut);font-size:12px}
 .fine a{color:inherit;text-decoration:underline}
-@media(max-width:800px){.hnav{display:none}}
+@media(max-width:800px){.hnav{display:none}.acct summary span{display:none}}
 @media(max-width:700px){.tick-mkt{width:88px;padding:0 12px}.tape{padding:18px 16px 6px}.bsehead{padding:0 16px;height:64px}.logo-wrap .logo{height:36px}.wrap{padding:28px 12px 40px}.card{padding:28px 20px 22px}}`;
 
 // ---------- the exchange's own pages around accounts: sign in, sign up, settings ----------
@@ -1191,10 +1221,28 @@ button.danger:hover{background:#fdecec}
 .toc{display:flex;flex-wrap:wrap;gap:6px 18px;margin:14px 0 4px;padding:10px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 .doc ol{padding-left:22px}.doc li{margin:4px 0}
 @media(max-width:700px){.kv{grid-template-columns:1fr}.btns{flex-direction:column}}`;
-const AUTH_NAV = `<nav class="hnav" aria-label="Primary"><a href="/markets">Listings</a><a href="/portfolio">Trading</a><a href="/overview">Market Data</a><a href="/#insights">Insights</a><a href="/developers">Developers</a><a href="/#about">About</a></nav>`;
-async function bsePage(title: string, main: string, opts: { status?: number; csrf?: string; description?: string; wide?: boolean } = {}): Promise<Response> {
-	const inst = settings().instance_name;
+const AUTH_NAV = `<nav class="hnav" aria-label="Primary"><a href="/markets">Listings</a><a href="/portfolio">Trading</a><a href="/overview">Market Data</a><a href="/developers">Developers</a></nav>`;
+async function accountMe(viewer: Viewer): Promise<{ name: string; avatar: string; sq: boolean }> {
+	const [u] = await sql`select coalesce(nullif(u.bse_name, ''), u.name) as name,
+		coalesce(u.bse_avatar_url, u.discord_avatar, case when u.bse_only then l.avatar_url else u.avatar_url end) as avatar_url,
+		case when u.bse_only then l.verified_type else u.verified_type end as badge
+		from users u left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null
+		where u.id = ${viewer.id}::bigint`;
+	return { name: u?.name ?? viewer.screen_name, avatar: pfpOf(u?.avatar_url), sq: squareBadge(u?.badge) };
+}
+async function bsePage(title: string, main: string, opts: { status?: number; csrf?: string; description?: string; wide?: boolean; viewer?: Viewer } = {}): Promise<Response> {
 	const tape = await marketTape();
+	const me = opts.viewer ? await accountMe(opts.viewer) : null;
+	const chip = me
+		? `<details class="acct"><summary><img src="${esc(me.avatar)}" alt="" class="${me.sq ? "sq" : ""}"><span>${esc(me.name)}</span></summary><div class="acctm" role="menu">
+<div class="lbl">${esc(me.name)}<div style="margin:2px 0 0">@${esc(opts.viewer!.screen_name)}</div></div>
+<a href="/account">Account settings</a>
+<a href="/portfolio">Portfolio</a>
+<a href="/developers">Developers</a>
+${isAdmin(opts.viewer) ? `<a href="/admin">Admin</a>` : ""}
+<a href="/logout">Log out</a>
+</div></details>`
+		: (opts.csrf ? "" : `<a class="signin" href="/login">Sign in</a>`);
 	const html = `<!DOCTYPE html>
 <html lang="en" data-theme="light" data-site="bse"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${esc(title)}</title>
@@ -1203,7 +1251,7 @@ ${BSE_ICONS}
 <meta name="description" content="${esc(opts.description ?? `Your ${BSE_NAME} account.`)}">
 <style>${LOGIN_CSS}${opts.wide ? DEV_CSS : ""}</style></head>
 <body>
-<header class="bsehead"><a class="wordmark" href="/" aria-label="${esc(BSE_SHORT)}">${BSE_WORDMARK}<span class="bname">${esc(BSE_NAME)}</span></a>${AUTH_NAV}<div class="grow"></div><a class="glink" href="${esc(PUBLIC_ORIGIN)}">${esc(inst)}</a></header>
+<header class="bsehead"><a class="wordmark" href="/" aria-label="${esc(BSE_SHORT)}">${BSE_WORDMARK}<span class="bname">${esc(BSE_NAME)}</span></a>${AUTH_NAV}<div class="grow"></div>${chip}</header>
 ${tape}
 <div class="wrap${opts.wide ? " wide" : ""}"><main class="card${opts.wide ? " wide" : ""}">
 ${main}
@@ -1238,11 +1286,9 @@ ${fields}
 </form>
 ${twoFactor
 	? `<p class="back"><a href="/login${q}">Back to sign in</a></p>`
-	: `<div class="or"><span>or</span></div>
-<a class="btn alt" href="/auth/bs${q}">Sign in with ${esc(inst)}</a>
-${discordOn() ? `<a class="btn discord" href="/auth/discord/start${q}">${DISCORD_MARK}Sign in with Discord</a>` : ""}
-<p class="links"><a href="/signup${q}">Create a BSE account</a><a href="${esc(PUBLIC_ORIGIN)}/account/forgot">Forgot a ${esc(inst)} password</a></p>`}`;
-	return bsePage(title, main, { status: opts.status, csrf, description: `Sign in to ${BSE_NAME} with a BSE account or your ${inst} account.` });
+	: `${discordOn() ? `<div class="or"><span>or</span></div><a class="btn discord" href="/auth/discord/start${q}">${DISCORD_MARK}Sign in with Discord</a>` : ""}
+<p class="links"><a href="/signup${q}">Create a BSE account</a></p>`}`;
+	return bsePage(title, main, { status: opts.status, csrf, description: `Sign in to ${BSE_NAME} with a BSE account or Discord.` });
 }
 
 async function signupPage(req: Request, opts: { next: string; error?: string; status?: number; typed?: { username?: string; name?: string }; csrf?: string }): Promise<Response> {
@@ -1250,7 +1296,7 @@ async function signupPage(req: Request, opts: { next: string; error?: string; st
 	const csrf = opts.csrf || loginCsrfFrom(req) || newLoginCsrf();
 	const q = `?next=${encodeURIComponent(opts.next)}`;
 	const main = `<h1>Create a BSE account</h1>
-<p class="note">Trade, hold Money and list companies without a ${esc(inst)} account. You can link one later in your account settings.</p>
+<p class="note">Trade, hold Money and list companies on the BSE. This account is yours here; you don't need any other account to use it.</p>
 ${opts.error ? `<p class="error" role="alert">${esc(opts.error)}</p>` : ""}
 <form method="post" action="/signup" autocomplete="on">
 <input type="hidden" name="csrf" value="${esc(csrf)}">
@@ -1259,7 +1305,7 @@ ${opts.error ? `<p class="error" role="alert">${esc(opts.error)}</p>` : ""}
 <label><span>Handle</span><span class="at"><b>@</b><input name="username" value="${esc(opts.typed?.username ?? "")}" autocomplete="username" autocapitalize="off" spellcheck="false" minlength="3" maxlength="15" pattern="@?[A-Za-z0-9_]{3,15}" required aria-describedby="un-help"></span><small id="un-help">3–15 letters, digits or underscores; you sign in with it. Handles are shared with ${esc(inst)}, so one that's taken there can't be used.</small></label>
 <label><span>Password</span><input name="password" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
 <label><span>Confirm password</span><input name="password2" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
-<p class="note small">A BSE account has no email, so it can't be reset by email. Link a ${esc(inst)} account in settings to be able to sign in with it too.</p>
+<p class="note small">A BSE account has no email, so a forgotten password can't be reset by email. You can add another way to sign in later in account settings.</p>
 <button type="submit">Create account</button>
 </form>
 <p class="links"><a href="/login${q}">I already have an account</a></p>`;
@@ -1356,44 +1402,122 @@ const ACCOUNT_NOTES: Record<string, [string, boolean]> = {
 	pwset: ["Your password is saved.", false],
 	revoked: ["That app can no longer use your account.", false],
 	pwbad: ["Passwords are 8 to 256 characters and have to match.", true],
+	saved: ["Your profile is saved.", false],
+	picset: ["Your profile picture is saved.", false],
+	picgone: ["Your profile picture is removed.", false],
+	bannerset: ["Your banner is saved.", false],
+	bannergone: ["Your banner is removed.", false],
+	handleok: ["Your handle is changed.", false],
+	handlebad: ["That handle couldn't be used.", true],
+	namebad: ["That name couldn't be used.", true],
+	picbad: ["That image couldn't be used.", true],
 };
-async function accountPage(req: Request, viewer: Viewer): Promise<Response> {
+async function accountPage(req: Request, viewer: Viewer, error = ""): Promise<Response> {
 	const inst = settings().instance_name;
-	const [u] = await sql`select u.screen_name, u.name, u.bse_only, u.created_at, u.bse_linked_at, u.discord_id, u.discord_avatar, u.discord_linked_at, u.bse_passwordless,
+	const [u] = await sql`select u.screen_name, u.name, u.avatar_url, u.bse_only, u.created_at, u.bse_linked_at, u.discord_id, u.discord_avatar, u.discord_linked_at, u.bse_passwordless,
+			u.bse_avatar_url, u.bse_banner_url, u.bse_bio, u.bse_name, u.verified_type,
 			l.screen_name as l_handle, l.name as l_name, l.avatar_url as l_avatar, l.verified_type as l_badge
 		from users u left join users l on l.id = u.bse_link_id where u.id = ${viewer.id}::bigint`;
 	const m = ACCOUNT_NOTES[new URL(req.url).searchParams.get("m") ?? ""];
-	const note = m ? `<p class="${m[1] ? "error" : "ok"}" role="status">${esc(m[0])}</p>` : "";
+	const note = error ? `<p class="error" role="alert">${esc(error)}</p>` : m ? `<p class="${m[1] ? "error" : "ok"}" role="status">${esc(m[0])}</p>` : "";
 	const check = (t: string | null) => {
 		const at = artType(t), src = at && art(at);
 		return src ? `<img class="ck" src="${esc(src)}" alt="${t === "business" ? "Verified organization" : t === "blue" ? "Verified account" : "Government account"}">` : "";
 	};
-	let body: string;
-	if (u.bse_only) {
-		const linked = u.l_handle
-			? `<div class="linked"><img src="${esc(pfpOf(u.l_avatar))}" alt="" class="${squareBadge(u.l_badge) ? "sq" : ""}"><div><b>${esc(u.l_name)}</b>${check(u.l_badge)}<div class="note">@${esc(u.l_handle)} · linked ${esc(new Date(u.bse_linked_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }))}</div></div></div>
-<p class="note">Its picture and checkmark show on your account and companies here, and "Sign in with ${esc(inst)}" signs in to this account. Balances stay separate.</p>
-<form method="post" action="/account/unlink"><input type="hidden" name="csrf" value="${esc(viewer.csrf)}"><button type="submit" class="alt">Unlink ${esc(inst)} account</button></form>`
-			: `<p class="note">Link a ${esc(inst)} account to show its picture and checkmark here and to sign in with it. You'll sign in on ${esc(inst)} to prove it's yours.</p>
-<a class="btn" href="/auth/bs?link=1">Link a ${esc(inst)} account</a>`;
-		const csrfIn = `<input type="hidden" name="csrf" value="${esc(viewer.csrf)}">`;
-		const discordBlock = u.discord_id
-			? `<div class="linked dc"><img src="${esc(u.discord_avatar || DEFAULT_PFP)}" alt=""><div><b>Discord</b><div class="note">Linked ${esc(new Date(u.discord_linked_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }))}. "Sign in with Discord" signs in to this account.</div></div></div>
-<form method="post" action="/account/discord/unlink">${csrfIn}<button type="submit" class="alt">Unlink Discord</button></form>`
-			: `<p class="note">Link your Discord account to sign in with it. Only your Discord name and picture are read.</p>
-<a class="btn discord" href="/auth/discord/start?link=1">${DISCORD_MARK}Link Discord</a>`;
-		const passwordForm = `<p class="note">This account was made with Discord and has no password. Add one to also sign in with your handle.</p>
+	const csrfIn = `<input type="hidden" name="csrf" value="${esc(viewer.csrf)}">`;
+	const display = String(u.bse_name || u.name);
+	const pic = pfpOf(u.bse_avatar_url || u.discord_avatar || (u.bse_only ? u.l_avatar : u.avatar_url));
+	const sq = squareBadge(u.bse_only ? u.l_badge : u.verified_type);
+	const banner = u.bse_banner_url as string | null;
+	const profile = `<h2>Profile</h2>
+${u.bse_only ? "" : `<p class="note">This is your BSE profile. It doesn't change your ${esc(inst)} profile unless you edit that on ${esc(inst)}.</p>`}
+${banner ? `<div class="banner-edit"><img class="ban" src="${esc(banner)}" alt=""></div>` : ""}
+<div class="pfp-edit"><img class="hero${sq ? " sq" : ""}" src="${esc(pic)}" alt="">
+<div class="col">
+<form method="post" action="/account/avatar" enctype="multipart/form-data">${csrfIn}
+<label class="file"><span>Profile picture</span><input type="file" name="avatar" accept="image/png,image/jpeg,image/gif,image/webp" required></label>
+<button type="submit" class="sm">Upload picture</button>
+</form>
+${u.bse_avatar_url ? `<form method="post" action="/account/avatar" style="margin-top:8px">${csrfIn}<input type="hidden" name="remove" value="1"><button type="submit" class="sm alt">Remove picture</button></form>` : `<p class="note" style="margin:8px 0 0">PNG, JPEG, GIF or WebP, under 2 MB.${u.discord_avatar || (u.bse_only && u.l_avatar) || (!u.bse_only && u.avatar_url) ? " Until you set one, a linked or social picture is used." : ""}</p>`}
+</div></div>
+<form method="post" action="/account/banner" enctype="multipart/form-data">${csrfIn}
+<label class="file"><span>Banner</span><input type="file" name="banner" accept="image/png,image/jpeg,image/gif,image/webp" required></label>
+<button type="submit" class="sm">Upload banner</button>
+${banner ? `</form><form method="post" action="/account/banner" style="margin-top:8px">${csrfIn}<input type="hidden" name="remove" value="1"><button type="submit" class="sm alt">Remove banner</button>` : ""}
+</form>
+<form method="post" action="/account/profile">${csrfIn}
+<label><span>Display name</span><input name="name" value="${esc(display)}" maxlength="${NAME_MAX}" required></label>
+${u.bse_only ? `<label><span>Handle</span><span class="at"><b>@</b><input name="username" value="${esc(u.screen_name)}" autocomplete="username" autocapitalize="off" spellcheck="false" minlength="3" maxlength="15" pattern="@?[A-Za-z0-9_]{3,15}" required></span><small>3–15 letters, digits or underscores. Handles are shared with ${esc(inst)}, so one that's taken there can't be used. You can change it a few times a day.</small></label>` : `<p class="note">Handle <b>@${esc(u.screen_name)}</b> · ${esc(inst)} account. Change it on ${esc(inst)} if you want to.</p>`}
+<label><span>Bio</span><textarea name="bio" maxlength="160" placeholder="A line about you, shown on your account.">${esc(u.bse_bio || "")}</textarea></label>
+<button type="submit">Save profile</button>
+</form>`;
+	const linked = u.l_handle
+		? `<div class="conn"><div class="linked" style="margin:0"><img src="${esc(pfpOf(u.l_avatar))}" alt="" class="${squareBadge(u.l_badge) ? "sq" : ""}"><div><b>${esc(u.l_name)}</b>${check(u.l_badge)}<div class="note">@${esc(u.l_handle)} · linked ${esc(new Date(u.bse_linked_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }))}. You can sign in with this ${esc(inst)} account. Balances stay separate.</div></div></div>
+<form method="post" action="/account/unlink">${csrfIn}<button type="submit" class="sm alt">Unlink</button></form></div>`
+		: `<div class="conn"><div><b>${esc(inst)}</b><div class="note">Optional. Lets you sign in with that account. Balances stay separate.</div></div><a class="btn sm" href="/auth/bs?link=1">Link</a></div>`;
+	const discordBlock = u.discord_id
+		? `<div class="conn"><div class="linked dc" style="margin:0"><img src="${esc(u.discord_avatar || DEFAULT_PFP)}" alt=""><div><b>Discord</b><div class="note">Linked ${esc(new Date(u.discord_linked_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }))}. "Sign in with Discord" signs in to this account.</div></div></div>
+<form method="post" action="/account/discord/unlink">${csrfIn}<button type="submit" class="sm alt">Unlink</button></form></div>`
+		: `<div class="conn"><div><b>Discord</b><div class="note">Optional. Only your Discord name and picture are read.</div></div><a class="btn sm discord" href="/auth/discord/start?link=1" style="margin-top:0">${DISCORD_MARK}Link</a></div>`;
+	const passwordForm = `<h2>Password</h2><p class="note">This account was made with Discord and has no password. Add one to also sign in with your handle.</p>
 <form method="post" action="/account/password">${csrfIn}<label><span>Password</span><input class="pw" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label><label><span>Confirm password</span><input class="pw" name="password2" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label><button type="submit">Save password</button></form>`;
-		body = `<dl class="facts"><dt>Name</dt><dd>${esc(u.name)}</dd><dt>Handle</dt><dd>@${esc(u.screen_name)} <span class="tag">BSE account</span></dd><dt>Joined</dt><dd>${esc(new Date(u.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }))}</dd></dl>
-<h2>${esc(inst)} account</h2>${linked}${discordOn() || u.discord_id ? `<h2>Discord account</h2>${discordBlock}` : ""}${u.bse_passwordless ? `<h2>Password</h2>${passwordForm}` : ""}`;
-	} else {
-		body = `<dl class="facts"><dt>Name</dt><dd>${esc(u.name)}</dd><dt>Handle</dt><dd>@${esc(u.screen_name)} <span class="tag">${esc(inst)} account</span></dd></dl>
-<p class="note">You sign in to ${esc(BSE_SHORT)} with your ${esc(inst)} account. Your balance, holdings and companies stay tied to it. Change your picture, name or password on <a href="${esc(PUBLIC_ORIGIN)}/settings/account">${esc(inst)}</a>.</p>`;
-	}
-	const apps = connectedAppsHtml(await connectedApps(viewer.id), viewer, devDeps(""));
-	const main = `<h1>Your account</h1>${note}${body}${apps}
+	const connected = u.bse_only
+		? `<h2>Connected accounts</h2>${discordOn() || u.discord_id ? discordBlock : ""}${linked}`
+		: `<h2>This account</h2><p class="note">You sign in to ${esc(BSE_SHORT)} with your ${esc(inst)} account. Your balance, holdings and companies stay tied to it. Password changes happen on <a href="${esc(PUBLIC_ORIGIN)}/settings/account">${esc(inst)}</a>.</p>`;
+	const apps = connectedAppsHtml(await connectedApps(viewer.id), viewer, devDeps("", viewer));
+	const main = `<h1>Your account</h1>${note}${profile}${connected}${u.bse_passwordless ? passwordForm : ""}${apps}
 <p class="links"><a href="/portfolio">Portfolio</a><a href="/logout">Sign out</a></p>`;
-	return bsePage(`Account · ${BSE_SHORT}`, main);
+	return bsePage(`Account · ${BSE_SHORT}`, main, { viewer });
+}
+async function saveProfile(viewer: Viewer, form: FormData): Promise<string> {
+	const inst = settings().instance_name;
+	const rawName = String(form.get("name") ?? "");
+	if (looksBlank(rawName)) return "namebad";
+	let name: string;
+	try { name = cleanText(rawName, NAME_MAX); }
+	catch (e) { if (e instanceof Refusal) return "namebad"; throw e; }
+	if ([...name].length < 1) return "namebad";
+	if (blockedNameIn(name) || hateInName(name) || forbiddenText(name)) return "namebad";
+	let bio: string;
+	try { bio = cleanText(form.get("bio") ?? "", 160); }
+	catch (e) { if (e instanceof Refusal) return "namebad"; throw e; }
+	const [u] = await sql`select bse_only from users where id = ${viewer.id}::bigint`;
+	if (u?.bse_only) {
+		const wanted = String(form.get("username") ?? "").trim().replace(/^@/, "");
+		if (wanted && wanted !== viewer.screen_name) {
+			const problem = await changeUsername(viewer, wanted);
+			if (problem) return "handlebad";
+		}
+		await sql`update users set name = ${name}, bse_bio = ${bio}, bse_name = null where id = ${viewer.id}::bigint`;
+	} else {
+		await sql`update users set bse_name = ${name}, bse_bio = ${bio} where id = ${viewer.id}::bigint`;
+	}
+	void inst;
+	changed++;
+	return "saved";
+}
+async function savePicture(viewer: Viewer, form: FormData, which: "avatar" | "banner"): Promise<string> {
+	const col = which === "avatar" ? "bse_avatar_url" : "bse_banner_url";
+	const [cur] = which === "avatar"
+		? await sql`select bse_avatar_url as url from users where id = ${viewer.id}::bigint`
+		: await sql`select bse_banner_url as url from users where id = ${viewer.id}::bigint`;
+	if (String(form.get("remove") ?? "") === "1") {
+		if (which === "avatar") await sql`update users set bse_avatar_url = null where id = ${viewer.id}::bigint`;
+		else await sql`update users set bse_banner_url = null where id = ${viewer.id}::bigint`;
+		removeStoredPhoto(cur?.url);
+		changed++;
+		return which === "avatar" ? "picgone" : "bannergone";
+	}
+	const file = form.get(which === "avatar" ? "avatar" : "banner");
+	if (!(file instanceof File) || !file.size) return "picbad";
+	const stored = await storeAccountPhoto(viewer.id, Buffer.from(await file.arrayBuffer()), which === "avatar" ? "pfp" : "banner");
+	if ("error" in stored) return "picbad";
+	const url = which === "avatar" ? `/media/${stored.id}` : `/media/banner/${stored.id}`;
+	if (which === "avatar") await sql`update users set bse_avatar_url = ${url} where id = ${viewer.id}::bigint`;
+	else await sql`update users set bse_banner_url = ${url} where id = ${viewer.id}::bigint`;
+	if (cur?.url && cur.url !== url) removeStoredPhoto(cur.url);
+	changed++;
+	return which === "avatar" ? "picset" : "bannerset";
 }
 async function bseAccountRoute(req: Request, viewer: Viewer | undefined, p: string): Promise<Response> {
 	if (!viewer) return Response.redirect(`/login?next=${encodeURIComponent("/account")}`, 302);
@@ -1401,11 +1525,13 @@ async function bseAccountRoute(req: Request, viewer: Viewer | undefined, p: stri
 		if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405 });
 		return accountPage(req, viewer);
 	}
-	// /account/unlink
 	if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
 	const form = await req.formData().catch(() => undefined);
 	const origin = req.headers.get("origin");
 	if (!form || origin !== requestOrigin(req) || !sameCsrf(String(form.get("csrf") ?? ""), viewer.csrf)) return new Response("This form expired. Go back and try again.", { status: 403 });
+	if (p === "/account/profile") return Response.redirect(`/account?m=${await saveProfile(viewer, form)}`, 303);
+	if (p === "/account/avatar") return Response.redirect(`/account?m=${await savePicture(viewer, form, "avatar")}`, 303);
+	if (p === "/account/banner") return Response.redirect(`/account?m=${await savePicture(viewer, form, "banner")}`, 303);
 	if (p === "/account/password") {
 		const pw = String(form.get("password") ?? ""), pw2 = String(form.get("password2") ?? "");
 		if (pw.length < 8 || pw.length > 256 || pw !== pw2) return Response.redirect("/account?m=pwbad", 303);
@@ -1428,6 +1554,7 @@ async function bseAccountRoute(req: Request, viewer: Viewer | undefined, p: stri
 	changed++;
 	return Response.redirect("/account?m=unlinked", 303);
 }
+
 
 async function finishBseSignIn(req: Request, session: { token: string; csrf: string; userId: string }, next: string): Promise<Response> {
 	const [u] = await sql`select status from users where id = ${session.userId}::bigint`;
@@ -1697,11 +1824,11 @@ function mapBsePage(pathname: string, q: URLSearchParams): { view?: string; tick
 const BSE_PASS = [/^\/abs\//, /^\/public\//, /^\/profile_images\//, /^\/media\//, /^\/i\/xitter\//, /^\/healthz$/, /^\/sw\.js$/];
 // the BSE's own host: pretty paths, its own layout, and a way to sign in with a Bloxburg Social account
 // what the developer portal (markets-dev.ts) borrows from here: the themed page, the text filter and the website's own trade path
-function devDeps(ip: string): DevDeps {
+function devDeps(ip: string, viewer?: Viewer): DevDeps {
 	return {
 		ip,
 		esc,
-		page: (title, main, o = {}) => bsePage(title, main, o),
+		page: (title, main, o = {}) => bsePage(title, main, { ...o, viewer }),
 		cleanText: (v, max) => {
 			try {
 				return cleanText(v, max);
@@ -1733,11 +1860,11 @@ export async function bseSite(req: Request, opts: { ip: string }): Promise<Respo
 	if (p === "/auth/bs") return bseAuthStart(req, viewer);
 	if (p === "/auth/discord/start") return discordStart(req, viewer);
 	if (p === "/auth/discord/callback") return discordCallback(req);
-	if (p === "/account" || p === "/settings" || p === "/account/unlink" || p === "/account/discord/unlink" || p === "/account/password") return bseAccountRoute(req, viewer, p);
+	if (p === "/account" || p === "/settings" || p === "/account/unlink" || p === "/account/discord/unlink" || p === "/account/password" || p === "/account/profile" || p === "/account/avatar" || p === "/account/banner") return bseAccountRoute(req, viewer, p);
 	if (p === "/auth" || p === "/auth/" || p === "/auth/callback" || p === "/auth/callback/") return bseAuthCallback(req);
 	if (p === "/logout") return bseLogout(url.searchParams.get("next") ?? "/");
-	if (p === "/account/apps/revoke") return viewer && req.method === "POST" ? revokeFromAccount(req, viewer, devDeps(opts.ip)) : Response.redirect(`/login?next=${encodeURIComponent("/account")}`, 302);
-	const dev = await devRoute(req, p, viewer, devDeps(opts.ip));
+	if (p === "/account/apps/revoke") return viewer && req.method === "POST" ? revokeFromAccount(req, viewer, devDeps(opts.ip, viewer)) : Response.redirect(`/login?next=${encodeURIComponent("/account")}`, 302);
+	const dev = await devRoute(req, p, viewer, devDeps(opts.ip, viewer));
 	if (dev) return dev;
 	if (p === MARKETS_PATH || p.startsWith(`${MARKETS_PATH}/`)) {
 		return marketsRoute(req, p, viewer, { clientShell: false, ip: opts.ip });
@@ -1783,6 +1910,12 @@ export async function marketsRoute(req: Request, p: string, viewer: Viewer | und
 	const logo = /^\/i\/markets\/logo\/(\d{1,19})$/.exec(p);
 	if (logo) {
 		const [r] = await sql`select logo, logo_type from market_companies where id = ${logo[1]} and logo is not null`;
+		if (!r) return new Response("not found", { status: 404 });
+		return new Response(r.logo, { headers: { "content-type": r.logo_type, "cache-control": "public, max-age=86400", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'" } });
+	}
+	const appLogo = /^\/i\/markets\/app-logo\/(\d{1,19})$/.exec(p);
+	if (appLogo) {
+		const [r] = await sql`select logo, logo_type from bse_apps where id = ${appLogo[1]}::bigint and logo is not null`;
 		if (!r) return new Response("not found", { status: 404 });
 		return new Response(r.logo, { headers: { "content-type": r.logo_type, "cache-control": "public, max-age=86400", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'" } });
 	}

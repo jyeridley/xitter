@@ -7,6 +7,7 @@
 
 import type { Viewer } from "./auth";
 import { requestOrigin, isOwnOrigin } from "./config";
+import { ImageError, imageFrom } from "./markets-images";
 import { sql } from "./db";
 import { newId } from "./ids";
 import { balanceOf } from "./money";
@@ -27,7 +28,7 @@ export type Deps = {
 	ip: string;
 };
 
-type App = { id: string; owner_id: string; name: string; description: string; website: string; redirects: string[]; client_id: string; secret_hash: string; disabled: boolean; created_at: Date; secret_rotated_at: Date | null; owner_handle?: string; owner_name?: string };
+type App = { id: string; owner_id: string; name: string; description: string; website: string; redirects: string[]; client_id: string; secret_hash: string; disabled: boolean; created_at: Date; secret_rotated_at: Date | null; owner_handle?: string; owner_name?: string; logo_v: number; has_logo: boolean };
 const redirectsOf = (v: unknown): string[] => {
 	try {
 		const a = typeof v === "string" ? JSON.parse(v) : v;
@@ -36,8 +37,15 @@ const redirectsOf = (v: unknown): string[] => {
 		return [];
 	}
 };
-const toApp = (r: any): App => ({ ...r, redirects: redirectsOf(r.redirect_uris), disabled: !!r.disabled });
-const APP_COLS = sql`a.id::text, a.owner_id::text, a.name, a.description, a.website, a.redirect_uris, a.client_id, a.secret_hash, a.disabled, a.created_at, a.secret_rotated_at, o.screen_name as owner_handle, o.name as owner_name`;
+const toApp = (r: any): App => ({ ...r, redirects: redirectsOf(r.redirect_uris), disabled: !!r.disabled, logo_v: Number(r.logo_v || 0), has_logo: !!r.has_logo });
+const appLogo = (a: { id: string; has_logo?: boolean; logo_v?: number }) => (a.has_logo ? `/i/markets/app-logo/${a.id}?v=${a.logo_v || 0}` : "");
+const appMark = (a: { id: string; name: string; has_logo?: boolean; logo_v?: number }, esc: (s: string) => string, cls = "app-ico") =>
+	a.has_logo ? `<img class="${cls}" src="${esc(appLogo(a))}" alt="">` : "";
+async function saveAppLogo(appId: string, file: unknown) {
+	const im = await imageFrom(file instanceof File && file.size ? file : undefined, "logo");
+	if (im) await sql`update bse_apps set logo = ${im.bytes}, logo_type = ${im.type}, logo_v = logo_v + 1 where id = ${appId}::bigint`;
+}
+const APP_COLS = sql`a.id::text, a.owner_id::text, a.name, a.description, a.website, a.redirect_uris, a.client_id, a.secret_hash, a.disabled, a.created_at, a.secret_rotated_at, a.logo_v, a.logo is not null as has_logo, o.screen_name as owner_handle, coalesce(nullif(o.bse_name, ''), o.name) as owner_name`;
 
 // ---------- apps ----------
 
@@ -107,14 +115,14 @@ export async function revokeGrant(userId: string, appId: string) {
 	if (!/^\d{1,19}$/.test(appId)) return;
 	await sql`update bse_tokens set revoked_at = now() where user_id = ${userId}::bigint and app_id = ${appId}::bigint and revoked_at is null`;
 }
-export type Grant = { app_id: string; app_name: string; website: string; developer: string; scopes: string[]; since: Date };
+export type Grant = { app_id: string; app_name: string; website: string; developer: string; scopes: string[]; since: Date; logo: string };
 export async function connectedApps(userId: string): Promise<Grant[]> {
-	const rows = await sql`select a.id::text as app_id, a.name as app_name, a.website, o.screen_name as developer, t.scopes, t.created_at
+	const rows = await sql`select a.id::text as app_id, a.name as app_name, a.website, o.screen_name as developer, t.scopes, t.created_at, a.logo_v, a.logo is not null as has_logo
 		from bse_tokens t join bse_apps a on a.id = t.app_id join users o on o.id = a.owner_id
 		where t.user_id = ${userId}::bigint and t.revoked_at is null and t.refresh_expires_at > now() and not a.disabled order by t.created_at`;
 	const by = new Map<string, Grant>();
 	for (const r of rows) {
-		const g = by.get(r.app_id) ?? { app_id: r.app_id, app_name: r.app_name, website: r.website, developer: r.developer, scopes: [], since: r.created_at };
+		const g = by.get(r.app_id) ?? { app_id: r.app_id, app_name: r.app_name, website: r.website, developer: r.developer, scopes: [], since: r.created_at, logo: r.has_logo ? `/i/markets/app-logo/${r.app_id}?v=${r.logo_v}` : "" };
 		for (const s of String(r.scopes).split(" ")) if (s && !g.scopes.includes(s)) g.scopes.push(s);
 		if (r.created_at < g.since) g.since = r.created_at;
 		by.set(r.app_id, g);
@@ -201,7 +209,7 @@ async function consentPage(req: Request, viewer: Viewer, a: AuthParams, d: Deps)
 	const scopes = a.scopes.map((s) => `<div class="scope"><b>${e(SCOPES[s].label)}</b><div class="note" style="margin:2px 0 0">${e(SCOPES[s].detail)}</div></div>`).join("");
 	const hidden = (k: string, v: string | null) => (v === null ? "" : `<input type="hidden" name="${k}" value="${e(v)}">`);
 	const next = new URL(req.url);
-	const main = `<h1>Connect ${e(a.app.name)}</h1>
+	const main = `<h1 class="row" style="align-items:center;gap:14px">${appMark(a.app, e, "app-ico")} <span>Connect ${e(a.app.name)}</span></h1>
 <p class="note"><b>${e(a.app.name)}</b> by <b>${e(a.app.owner_name || a.app.owner_handle || "")}</b> (@${e(a.app.owner_handle ?? "")}) wants to use your BSE account${a.app.website ? ` · <a href="${e(a.app.website)}" rel="noopener noreferrer nofollow" target="_blank">${e(new URL(a.app.website).host)}</a>` : ""}.</p>
 ${a.app.description ? `<p class="note">${e(a.app.description)}</p>` : ""}
 <h2>It will be able to</h2>${scopes}
@@ -351,7 +359,11 @@ async function apiRoute(req: Request, p: string, d: Deps): Promise<Response> {
 		const denied = need("read");
 		if (denied) return denied;
 		const cents = await balanceOf(token!.user_id);
-		return ok({ id: token!.user_id, handle: token!.handle, name: token!.name, cash: cents / 100, cash_cents: cents, scope: token!.scopes, app: token!.app_name });
+				const [av] = await sql`select coalesce(u.bse_avatar_url, u.discord_avatar, case when u.bse_only then l.avatar_url else u.avatar_url end) as avatar, coalesce(nullif(u.bse_name, ''), u.name) as name
+			from users u left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null where u.id = ${token!.user_id}::bigint`;
+		const origin = requestOrigin(req);
+		const avatar = av?.avatar ? (String(av.avatar).startsWith("http") ? av.avatar : origin + (String(av.avatar).startsWith("/media/") && !String(av.avatar).includes("banner") && /^\/media\/(\d{1,19})$/.test(av.avatar) ? `/profile_images/${/^\/media\/(\d{1,19})$/.exec(av.avatar)![1]}_x96.jpg` : av.avatar)) : `${origin}/abs/sticky/default_profile_images/default_profile_normal.png`;
+		return ok({ id: token!.user_id, handle: token!.handle, name: av?.name ?? token!.name, avatar, cash: cents / 100, cash_cents: cents, scope: token!.scopes, app: token!.app_name });
 	}
 	if ((parts[0] === "portfolio" || parts[0] === "holdings") && parts.length === 1 && req.method === "GET") {
 		const denied = need("read");
@@ -407,10 +419,12 @@ const NOTES: Record<string, [string, boolean]> = {
 const hiddenCsrf = (v: Viewer, d: Deps) => `<input type="hidden" name="csrf" value="${d.esc(v.csrf)}">`;
 function appForm(d: Deps, viewer: Viewer, action: string, a?: Partial<App>, button = "Register app"): string {
 	const e = d.esc;
-	return `<form method="post" action="${e(action)}">${hiddenCsrf(viewer, d)}
+	const current = a?.id && a.has_logo ? `<div class="row" style="align-items:center;margin:0 0 10px">${appMark(a as App, e)}<span class="note" style="margin:0">Current logo</span></div>` : "";
+	return `<form method="post" action="${e(action)}" enctype="multipart/form-data">${hiddenCsrf(viewer, d)}
 <label><span>App name</span><input name="name" value="${e(a?.name ?? "")}" maxlength="50" required></label>
 <label><span>Description</span><textarea name="description" maxlength="300" placeholder="What does your app do? People see this when they connect it.">${e(a?.description ?? "")}</textarea></label>
 <label><span>Website</span><input name="website" type="url" value="${e(a?.website ?? "")}" placeholder="https://example.com" maxlength="200"></label>
+<label class="file"><span>Logo</span>${current}<input type="file" name="logo" accept="image/png,image/jpeg,image/gif,image/webp"></label>
 <label><span>Redirect URIs <i>(one per line)</i></span><textarea name="redirect_uris" required placeholder="https://example.com/callback">${e((a?.redirects ?? []).join("\n"))}</textarea><small>Where people are sent back after they say yes. They have to match exactly. https only (http://localhost works for development).</small></label>
 <button type="submit">${e(button)}</button></form>`;
 }
@@ -427,7 +441,7 @@ async function portalPage(req: Request, viewer: Viewer | undefined, d: Deps): Pr
 	}
 	const apps = await appsOf(viewer.id);
 	const list = apps.length
-		? `<div class="apps">${apps.map((a) => `<div class="app"><div class="row" style="justify-content:space-between;align-items:baseline"><h3>${e(a.name)}${a.disabled ? ` <span class="tag" style="border-color:var(--dn);color:var(--dn)">Disabled</span>` : ""}</h3><a class="btn sm" href="/developers/apps/${e(a.id)}">Manage</a></div>
+		? `<div class="apps">${apps.map((a) => `<div class="app"><div class="row" style="justify-content:space-between;align-items:center"><div class="row" style="align-items:center;gap:12px;min-width:0">${appMark(a, e)}<h3 style="margin:0">${e(a.name)}${a.disabled ? ` <span class="tag" style="border-color:var(--dn);color:var(--dn)">Disabled</span>` : ""}</h3></div><a class="btn sm" href="/developers/apps/${e(a.id)}">Manage</a></div>
 <div class="meta">Registered ${e(date(a.created_at))}${a.website ? ` · ${e(new URL(a.website).host)}` : ""}</div>
 <dl class="kv"><dt>Client ID</dt><dd class="mono">${e(a.client_id)}</dd><dt>Redirect URIs</dt><dd>${fmtList(d, a.redirects)}</dd></dl></div>`).join("")}</div>`
 		: `<p class="note">You haven't registered an app yet.</p>`;
@@ -453,10 +467,10 @@ async function appPage(req: Request, viewer: Viewer, app: App, d: Deps, error = 
 	const note = error ? `<p class="error" role="alert">${e(error)}</p>` : m ? `<p class="${m[1] ? "error" : "ok"}" role="status">${e(m[0])}</p>` : "";
 	const [use] = await sql`select (select count(distinct user_id)::int from bse_tokens where app_id = ${app.id}::bigint and revoked_at is null and refresh_expires_at > now()) as users,
 		(select count(*)::int from market_txns where app_id = ${app.id}::bigint) as orders`;
-	return d.page(`${app.name} · Developers · BSE`, `<h1>${e(app.name)}${app.disabled ? ` <span class="tag" style="border-color:var(--dn);color:var(--dn)">Disabled</span>` : ""}</h1>
+	return d.page(`${app.name} · Developers · BSE`, `<h1 class="row" style="align-items:center;gap:14px">${appMark(app, e)}<span>${e(app.name)}${app.disabled ? ` <span class="tag" style="border-color:var(--dn);color:var(--dn)">Disabled</span>` : ""}</span></h1>
 <p class="note">${app.disabled ? "Staff disabled this app: it can't sign anyone in and its tokens stopped working." : "Registered " + e(date(app.created_at)) + (app.secret_rotated_at ? ` · secret regenerated ${e(date(app.secret_rotated_at))}` : "")}</p>${note}
 <dl class="kv"><dt>Client ID</dt><dd class="mono">${e(app.client_id)}</dd><dt>Client secret</dt><dd class="note" style="margin:0">Hidden. Regenerate it below if you've lost it.</dd><dt>Connected people</dt><dd>${use.users}</dd><dt>Orders placed</dt><dd>${use.orders}</dd></dl>
-<h2>Details</h2>${appForm(d, viewer, `/developers/apps/${app.id}`, app, "Save changes")}
+<h2>Details</h2>${appForm(d, viewer, `/developers/apps/${app.id}`, app, "Save changes")}${app.has_logo ? `<form method="post" action="/developers/apps/${e(app.id)}" style="margin-top:8px">${hiddenCsrf(viewer, d)}<input type="hidden" name="name" value="${e(app.name)}"><input type="hidden" name="description" value="${e(app.description)}"><input type="hidden" name="website" value="${e(app.website)}"><input type="hidden" name="redirect_uris" value="${e(app.redirects.join("\n"))}"><input type="hidden" name="remove_logo" value="1"><button type="submit" class="sm alt">Remove logo</button></form>` : ""}
 <h2>Client secret</h2><p class="note">Make a new secret. The old one stops working at once; tokens people already gave your app keep working.</p>
 <form method="post" action="/developers/apps/${e(app.id)}/secret" onsubmit="return confirm('Regenerate the client secret? The old one stops working immediately.')">${hiddenCsrf(viewer, d)}<button type="submit" class="alt">Regenerate secret</button></form>
 <h2>Delete app</h2><p class="note">Deleting the app disconnects everyone who connected it. Orders they placed stay in their history.</p>
@@ -478,6 +492,8 @@ async function portalRoute(req: Request, p: string, viewer: Viewer | undefined, 
 		try {
 			const input = checkApp(Object.fromEntries(form!.entries()), d.cleanText);
 			const made = await createApp(viewer.id, input);
+			try { await saveAppLogo(made.id, form!.get("logo")); }
+			catch (le) { if (!(le instanceof ImageError)) throw le; }
 			return secretPage(d, "App registered", { id: made.id, name: input.name }, made.clientId, made.secret);
 		} catch (e) {
 			const msg = appError(e);
@@ -505,6 +521,8 @@ async function portalRoute(req: Request, p: string, viewer: Viewer | undefined, 
 	}
 	try {
 		await updateApp(app.id, viewer.id, checkApp(Object.fromEntries(form!.entries()), d.cleanText));
+		if (String(form!.get("remove_logo") ?? "") === "1") await sql`update bse_apps set logo = null, logo_type = null, logo_v = logo_v + 1 where id = ${app.id}::bigint`;
+		else try { await saveAppLogo(app.id, form!.get("logo")); } catch (le) { if (!(le instanceof ImageError)) throw le; else return appPage(req, viewer, app, d, le.message); }
 		return redirectTo(`/developers/apps/${app.id}?m=saved`);
 	} catch (e) {
 		const msg = appError(e);
@@ -520,12 +538,12 @@ async function adminPage(req: Request, viewer: Viewer | undefined, d: Deps): Pro
 	if (!viewer) return redirectTo(`/login?next=${encodeURIComponent("/developers/admin")}`, 302);
 	if (viewer.role !== "admin") return d.page("Not found · BSE", `<h1>Not found</h1>`, { status: 404 });
 	const e = d.esc;
-	const rows = await sql`select a.id::text, a.name, a.client_id, a.disabled, a.created_at, o.screen_name as owner,
+	const rows = await sql`select a.id::text, a.name, a.client_id, a.disabled, a.created_at, o.screen_name as owner, a.logo_v, a.logo is not null as has_logo,
 		(select count(distinct user_id)::int from bse_tokens t where t.app_id = a.id and t.revoked_at is null and t.refresh_expires_at > now()) as users,
 		(select count(*)::int from market_txns x where x.app_id = a.id) as orders
 		from bse_apps a join users o on o.id = a.owner_id order by a.created_at desc`;
 	const body = rows.length
-		? `<table class="t"><thead><tr><th>App</th><th>Developer</th><th>Registered</th><th>People</th><th>Orders</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((r: any) => `<tr><td><b>${e(r.name)}</b><div class="mono" style="font-size:12px;color:var(--mut)">${e(r.client_id)}</div></td><td>@${e(r.owner)}</td><td>${e(date(r.created_at))}</td><td>${r.users}</td><td>${r.orders}</td><td>${r.disabled ? `<span class="tag" style="border-color:var(--dn);color:var(--dn)">Disabled</span>` : "Active"}</td>
+		? `<table class="t"><thead><tr><th>App</th><th>Developer</th><th>Registered</th><th>People</th><th>Orders</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((r: any) => `<tr><td><div class="row" style="align-items:center;gap:10px">${r.has_logo ? `<img class="app-ico" src="${e(`/i/markets/app-logo/${r.id}?v=${r.logo_v}`)}" alt="">` : ""}<div><b>${e(r.name)}</b><div class="mono" style="font-size:12px;color:var(--mut)">${e(r.client_id)}</div></div></div></td><td>@${e(r.owner)}</td><td>${e(date(r.created_at))}</td><td>${r.users}</td><td>${r.orders}</td><td>${r.disabled ? `<span class="tag" style="border-color:var(--dn);color:var(--dn)">Disabled</span>` : "Active"}</td>
 <td><form method="post" action="/developers/admin/toggle">${hiddenCsrf(viewer, d)}<input type="hidden" name="id" value="${e(r.id)}"><button type="submit" class="sm ${r.disabled ? "" : "alt danger"}">${r.disabled ? "Enable" : "Disable"}</button></form></td></tr>`).join("")}</tbody></table>`
 		: `<p class="note">No apps have been registered yet.</p>`;
 	return d.page("Developer apps · Admin · BSE", `<h1>Developer apps</h1><p class="note">Disabling an app stops it signing anyone in and invalidates its tokens straight away. Enabling it brings it back.</p>${body}<p class="links"><a href="/developers">Developer portal</a><a href="/admin">BSE admin</a></p>`, { wide: true });
@@ -547,8 +565,8 @@ async function adminToggle(req: Request, viewer: Viewer | undefined, d: Deps): P
 export function connectedAppsHtml(grants: Grant[], viewer: Viewer, d: Deps): string {
 	const e = d.esc;
 	if (!grants.length) return `<h2>Connected apps</h2><p class="note">No apps are connected to your account. Apps you allow to use it show up here, and you can disconnect them at any time.</p>`;
-	return `<h2>Connected apps</h2>${grants.map((g) => `<div class="app" style="margin:10px 0"><div class="row" style="justify-content:space-between;align-items:center"><div><b>${e(g.app_name)}</b>${g.website ? ` · <a href="${e(g.website)}" rel="noopener noreferrer nofollow" target="_blank">${e(new URL(g.website).host)}</a>` : ""}
-<div class="note" style="margin:2px 0 0">By @${e(g.developer)} · can ${g.scopes.map((s) => e(SCOPES[s]?.label.toLowerCase() ?? s)).join(" and ")} · connected ${e(date(g.since))}</div></div>
+	return `<h2>Connected apps</h2>${grants.map((g) => `<div class="app" style="margin:10px 0"><div class="row" style="justify-content:space-between;align-items:center"><div class="row" style="align-items:center;gap:12px;min-width:0">${g.logo ? `<img class="app-ico" src="${e(g.logo)}" alt="">` : ""}<div><b>${e(g.app_name)}</b>${g.website ? ` · <a href="${e(g.website)}" rel="noopener noreferrer nofollow" target="_blank">${e(new URL(g.website).host)}</a>` : ""}
+<div class="note" style="margin:2px 0 0">By @${e(g.developer)} · can ${g.scopes.map((s) => e(SCOPES[s]?.label.toLowerCase() ?? s)).join(" and ")} · connected ${e(date(g.since))}</div></div></div>
 <form method="post" action="/account/apps/revoke" style="margin:0">${hiddenCsrf(viewer, d)}<input type="hidden" name="app" value="${e(g.app_id)}"><button type="submit" class="sm alt">Revoke</button></form></div></div>`).join("")}`;
 }
 export async function revokeFromAccount(req: Request, viewer: Viewer, d: Deps): Promise<Response> {

@@ -656,7 +656,7 @@ async function cacheFor(viewer: Viewer, served: Served): Promise<string | undefi
 		// alone: ids are snowflakes, not secrets.
 		const path = `/media/${served.id}`;
 		const [shown] = await sql`select 1 where
-			exists (select 1 from users where id = ${served.owner}::bigint and (avatar_url = ${path} or banner_url = ${`/media/banner/${served.id}`}))
+			exists (select 1 from users where id = ${served.owner}::bigint and (avatar_url = ${path} or bse_avatar_url = ${path} or banner_url = ${`/media/banner/${served.id}`} or bse_banner_url = ${`/media/banner/${served.id}`}))
 			or exists (select 1 from lists l where l.banner_media_id = ${served.id}::bigint
 				and (l.owner_id = ${viewer.id}::bigint or (not l.is_private and l.owner_id not in ${blockedFor(viewer.id)})))
 			or exists (select 1 from communities where banner_url = ${path})
