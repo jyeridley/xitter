@@ -1998,7 +1998,7 @@ create table if not exists market_headlines (
 );
 create table if not exists market_accounts (
 	user_id bigint primary key references users(id) on delete cascade,
-	cash numeric(18,2) not null default 5000,
+	cash numeric(18,2) not null default 1000,
 	created_at timestamptz not null default now()
 );
 create table if not exists market_holdings (
@@ -2090,3 +2090,5 @@ alter table users add column if not exists discord_linked_at timestamptz;
 alter table users add column if not exists bse_passwordless boolean not null default false;
 create unique index if not exists users_discord_id_key on users (discord_id) where discord_id is not null;
 create index if not exists market_txns_ticker_created on market_txns (ticker, created_at desc);
+
+alter table market_accounts alter column cash set default 1000;

@@ -51,7 +51,7 @@ check("cents format", formatCents(352) === "$3.52" && formatCents(123456) === "$
 const ids = [await createUser(a, "Money A", "testpass123"), await createUser(b, "Money B", "testpass123"), await createUser(c, "Money C", "testpass123")];
 // a new wallet gets the instance's starting balance; these start at $100 so the sums below hold
 const [saved] = await sql`select value from settings where key = 'money'`;
-const starting = Number(saved?.value?.starting_cents ?? 500);
+const starting = Number(saved?.value?.starting_cents ?? 100_000);
 const fresh = await createUser(`m${stamp}d`, "Money D", "testpass123");
 ids.push(fresh);
 // staff, to switch Money on for the run and off again
