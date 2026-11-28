@@ -1,4 +1,4 @@
-// BSE, the Bloxburg Stock Exchange, at /i/markets and trade.bs.xitter.space: staff (the admin role) and
+// BSE, the Bloxburg Stock Exchange, at /i/markets and trade.xitter.space: staff (the admin role) and
 // any account can list companies (checkmarked ones show as verified), prices drift a little
 // every two seconds, and every signed-in account trades with its money
 // (money.ts: the wallet's balance is the cash; a buy takes from it and a sale
@@ -898,7 +898,7 @@ export async function marketLinkCard(url: string): Promise<Record<string, unknow
 // ---------- routes ----------
 
 
-// ---------- the BSE's own site (trade.bs.xitter.space) ----------
+// ---------- the BSE's own site (trade.xitter.space) ----------
 
 const optsIp = (req: Request) => req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
 // a relative path on the BSE site, or "/" when the value isn't one of ours

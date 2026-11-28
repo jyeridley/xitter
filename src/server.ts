@@ -3,7 +3,7 @@ import { multiViewer } from "./accounts";
 import { gbeePage } from "./gbee-page";
 import { CLIENT_DIR, clientDir, clientPathAllowed, getClientFile, getClientFilePath, hasClientFile, withClientDir } from "./client-cache";
 import { CLIENT_COOKIE, chosenClient, clientCookie, clientRoute, requestClient, switchByQuery } from "./client-choice";
-import { PORT, PUBLIC_ORIGIN, isBseHost, isOwnOrigin } from "./config";
+import { BSE_HOST_OLD, PORT, PUBLIC_ORIGIN, bseOrigin, isBseHost, isOwnOrigin } from "./config";
 import { migrate, sql } from "./db";
 import { knownOperation, runOperation } from "./graphql";
 import { brandingFile } from "./branding";
@@ -453,9 +453,14 @@ async function route(req: Request): Promise<Response | undefined> {
 	rememberIp(req, server.requestIP(req)?.address);
 	const url = new URL(req.url);
 	const p = url.pathname;
-	// old address: send rwl.xitter.space to the main domain, same path
-	if ((req.headers.get("host") ?? "").toLowerCase().split(":")[0] === "rwl.xitter.space") {
+	// old addresses: rwl.xitter.space to the main domain, the BSE's first host to trade.xitter.space
+	const host = (req.headers.get("host") ?? "").toLowerCase().split(":")[0];
+	if (host === "rwl.xitter.space") {
 		const to = `https://bs.xitter.space${p}${url.search}`;
+		return new Response(null, { status: req.method === "GET" || req.method === "HEAD" ? 301 : 308, headers: { location: to } });
+	}
+	if (host === BSE_HOST_OLD) {
+		const to = `${bseOrigin()}${p}${url.search}`;
 		return new Response(null, { status: req.method === "GET" || req.method === "HEAD" ? 301 : 308, headers: { location: to } });
 	}
 	// for Docker's health check (Dockerfile): the server answers and reaches its database
