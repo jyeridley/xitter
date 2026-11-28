@@ -806,23 +806,13 @@ ${face}<text x="${tx}" y="${c ? 128 : 132}" font-size="34" font-weight="700" fil
 <text x="${tx}" y="${c ? 166 : 168}" font-size="24" fill="#5b5b5b">${sub}</text>
 <text x="56" y="${c ? 232 : 222}" font-size="52" font-weight="800" fill="#000000">${value}</text>
 ${pill}${chart}
-<text x="1144" y="610" font-size="20" fill="#5b5b5b" text-anchor="end">${esc(ogFoot(c?.ticker ?? null, origin))}</text>
 </svg>`;
 }
 const pictures = new Map<string, Promise<Buffer>>();
-function ogFoot(ticker: string | null, origin: string): string {
-	try {
-		const host = new URL(origin).host;
-		if (isBseHostName(host) || host.startsWith("trade.") || host.startsWith("bse.")) return ticker ? `${host}/c/${ticker}` : host;
-		return `${host}${MARKETS_PATH}${ticker ? `?c=${ticker}` : ""}`;
-	} catch {
-		return OWN_HOST;
-	}
-}
 async function ogImage(ticker: string | null, origin: string = PUBLIC_ORIGIN): Promise<Buffer> {
 	const s = await shared();
 	const c = companyBy(s, ticker);
-	const key = `${c?.ticker ?? ""}:${origin}:${Math.floor(Date.now() / 60000)}`;
+	const key = `nolink:${c?.ticker ?? ""}:${origin}:${Math.floor(Date.now() / 60000)}`;
 	let p = pictures.get(key);
 	if (!p) {
 		p = Promise.all([ogPicture(c), checkArt(c?.owner?.badge)]).then(([pic, check]) => png(ogSvg(s, c, pic, check, origin)));
@@ -912,8 +902,8 @@ function exportSvg(c: Company, range: number, label: string, pic: string | null,
 	const sy = cy + ch + 22, colW = (W - 96) / 4;
 	const row = `<rect x="48" y="${sy}" width="${W - 96}" height="76" rx="0" fill="#fff" stroke="#000"/>`
 		+ stats.map(([k, v], i) => `<text x="${72 + i * colW}" y="${sy + 30}" font-size="16" fill="#5b5b5b">${esc(k)}</text><text x="${72 + i * colW}" y="${sy + 58}" font-size="22" font-weight="700" fill="#000000">${esc(fitText(v, 22, colW - 30))}</text>`).join("");
-	const foot = `${bseLogoMark(48, H - 38, 20)}`
-		+ `<text x="${W - 48}" y="${H - 22}" font-size="17" fill="#5b5b5b" text-anchor="end">${esc(new URL(origin).host)}</text>`;
+	// the BSE mark only: no site address on the picture
+	const foot = `${bseLogoMark(48, H - 38, 20)}`;
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="${W * S}" height="${H * S}" viewBox="0 0 ${W} ${H}" font-family="${FONT}">
 <rect width="${W}" height="${H}" fill="#ffffff"/>
 <rect width="${W}" height="8" fill="#7bcdee"/>
