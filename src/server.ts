@@ -3,7 +3,7 @@ import { multiViewer } from "./accounts";
 import { gbeePage } from "./gbee-page";
 import { CLIENT_DIR, clientDir, clientPathAllowed, getClientFile, getClientFilePath, hasClientFile, withClientDir } from "./client-cache";
 import { CLIENT_COOKIE, chosenClient, clientCookie, clientRoute, requestClient, switchByQuery } from "./client-choice";
-import { BSE_HOST, BSE_HOST_LEGACY, BSE_HOST_OLD, PORT, PUBLIC_ORIGIN, bseOrigin, isBseHost, isOwnOrigin } from "./config";
+import { BSE_HOST_OLD, PORT, PUBLIC_ORIGIN, bseOrigin, isBseHost, isOwnOrigin, legacyBseRedirect } from "./config";
 import { snapshotBseProfiles } from "./markets-snapshot";
 import { migrate, sql } from "./db";
 import { knownOperation, runOperation } from "./graphql";
@@ -477,11 +477,11 @@ async function route(req: Request): Promise<Response | undefined> {
 		const db = await Promise.race([sql`select 1`.then(() => true, () => false), Bun.sleep(3000).then(() => false)]);
 		return new Response(db ? "ok" : "database unreachable", { status: db ? 200 : 503, headers: { "cache-control": "no-store" } });
 	}
-	// the exchange's previous address, trade.xitter.space, sends every path to its home on BSE_HOST
-	if (host === BSE_HOST_LEGACY && BSE_HOST !== BSE_HOST_LEGACY) {
-		const to = `https://${BSE_HOST}${p}${url.search}`;
-		return new Response(null, { status: req.method === "GET" || req.method === "HEAD" ? 301 : 308, headers: { location: to } });
-	}
+	// trade.xitter.space: when it is no longer BSE_HOST, send other paths to the new host,
+	// keeping the path and query. Out-of-band OAuth callback pages stay on this host so a
+	// registered redirect URI still lands here and the ?code= query is never dropped.
+	const legacyTo = legacyBseRedirect(host, p, url.search);
+	if (legacyTo) return new Response(null, { status: req.method === "GET" || req.method === "HEAD" ? 301 : 308, headers: { location: legacyTo } });
 	if (p === "/federation/superadmin/accept") return acceptTicket(req, requestIp(req) ?? "unknown");
 	// /i/xitter/* holds Xitter's own static files, served before sign-in and
 	// rate limits: avatar decoration images, the locally cached Google Fonts and

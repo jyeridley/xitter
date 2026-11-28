@@ -37,8 +37,21 @@ test("scopes: default read, unknown refused, no repeats", () => {
 });
 
 test("redirect URIs: https, or http on this machine; nothing sneaky", () => {
-	for (const ok of ["https://example.com/cb", "https://app.example.com:8443/a?b=c", "http://localhost:3000/cb", "http://127.0.0.1:8080/", "http://app.localhost/x"])
+	for (const ok of [
+		"https://example.com/cb",
+		"https://app.example.com:8443/a?b=c",
+		"http://localhost:3000/cb",
+		"http://127.0.0.1:8080/",
+		"http://app.localhost/x",
+		"https://trade.xitter.space/oauth/discord-callback",
+		"https://bse.jye.supply/oauth/discord-callback",
+		"https://trade.xitter.space/oauth/oob",
+		"https://bse.jye.supply/oauth/oob",
+	])
 		expect(validRedirectUri(ok)).toBe(true);
+	expect(redirectAllowed(["https://trade.xitter.space/oauth/discord-callback"], "https://trade.xitter.space/oauth/discord-callback")).toBe(true);
+	expect(redirectAllowed(["https://bse.jye.supply/oauth/discord-callback"], "https://bse.jye.supply/oauth/discord-callback")).toBe(true);
+	expect(redirectAllowed(["https://trade.xitter.space/oauth/discord-callback"], "https://trade.xitter.space/oauth/discord-callback/")).toBe(false);
 	for (const bad of ["http://example.com/cb", "javascript:alert(1)", "https://example.com/cb#frag", "https://user:pw@example.com/", "ftp://x.com/", "example.com/cb", "https://exa mple.com/", "data:text/html,x", ""])
 		expect(validRedirectUri(bad)).toBe(false);
 	expect(validRedirectUri("https://example.com/" + "a".repeat(600))).toBe(false);

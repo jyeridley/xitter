@@ -11,6 +11,16 @@ export const BSE_HOST = (process.env.BSE_HOST ?? "bse.jye.supply").trim().toLowe
 export const BSE_HOST_OLD = "trade.bs.xitter.space";
 const BSE_HOSTS = new Set([BSE_HOST, "bse.jye.supply", BSE_HOST_LEGACY, "trade.localhost", "bse.localhost"]);
 export const isBseHostName = (h: string) => BSE_HOSTS.has(h.split(":")[0].toLowerCase());
+// out-of-band OAuth callback pages (no inbound listener on the app): served on the BSE host, no auth
+export const isBseOobPath = (p: string) =>
+	p === "/oauth/discord-callback" || p === "/oauth/oob" || p === "/oauth/discord-callback/" || p === "/oauth/oob/";
+// when trade.xitter.space is no longer BSE_HOST, other paths 301 there with path + query intact.
+// OOB callback pages stay on the registered host so a ?code= query can never be dropped by the redirect.
+export function legacyBseRedirect(host: string, path: string, search: string, canonical = BSE_HOST): string | null {
+	if (host !== BSE_HOST_LEGACY || canonical === BSE_HOST_LEGACY) return null;
+	if (isBseOobPath(path)) return null;
+	return `https://${canonical}${path}${search}`;
+}
 // first-party OAuth client (oauth.ts): public PKCE, no client secret
 export const BSE_OAUTH_CLIENT_ID = "2124290000000000800";
 export const BSE_OAUTH_NAME = "BSE — Bloxburg Stock Exchange";

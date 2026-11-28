@@ -613,6 +613,17 @@ function docsPage(req: Request, d: Deps): Promise<Response> {
 ${code(`{ "access_token": "bse_at_…", "token_type": "Bearer", "expires_in": 3600,
   "refresh_token": "bse_rt_…", "scope": "read trade" }`)}
 <p><b>Confidential apps</b> (a server) send the <code class="i">client_secret</code>. <b>Public apps</b> (a browser or mobile app) must not hold a secret: use PKCE and send only the <code class="i">client_id</code> and <code class="i">code_verifier</code> (43–128 characters from <code class="i">A-Z a-z 0-9 - . _ ~</code>). You can also authenticate with HTTP Basic (<code class="i">client_id:client_secret</code>).</p>
+<h3>Out-of-band redirect</h3>
+<p>If your app can't accept an inbound HTTP request (a Discord bot, for example), register one of these BSE-hosted pages as the redirect URI, exactly:</p>
+<ul>
+<li><code class="i">https://trade.xitter.space/oauth/discord-callback</code></li>
+<li><code class="i">https://bse.jye.supply/oauth/discord-callback</code></li>
+</ul>
+<p>The same page is also at <code class="i">${e(o)}/oauth/discord-callback</code> and the alias <code class="i">/oauth/oob</code>. After the person approves your app they're sent here. The page heading is <i>Paste this into Discord</i>. It shows the <code class="i">code</code> and <code class="i">state</code> with a copy button for each, plus <b>Copy both</b>, which copies this JSON object with no extra whitespace:</p>
+${code(`{"code":"bse_code_…","state":"…"}`)}
+<p>If they say no, it copies:</p>
+${code(`{"error":"access_denied","error_description":"…"}`)}
+<p>Your app parses that string (<code class="i">JSON.parse</code>), then exchanges the code at <code class="i">/oauth/token</code> as usual. Public clients must use PKCE and send only <code class="i">client_id</code> and <code class="i">code_verifier</code> — no <code class="i">client_secret</code>.</p>
 <h3>3. Refresh</h3>
 <p>Access tokens last 1 hour. Refresh tokens last 30 days and are rotated: each use gives a new pair and the old refresh token stops working.</p>${code(`curl -X POST ${o}/oauth/token \\
   -d grant_type=refresh_token -d refresh_token=bse_rt_… \\

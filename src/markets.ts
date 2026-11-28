@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Viewer } from "./auth";
 import { getViewer, login, startSession, sessionCookies, clearedCookies, SECURE, sessionKey } from "./auth";
-import { BSE_NAME, BSE_OAUTH_CLIENT_ID, BSE_SHORT, PUBLIC_ORIGIN, bseOrigin, isBseHost, isBseHostName, isOwnOrigin, requestOrigin } from "./config";
+import { BSE_NAME, BSE_OAUTH_CLIENT_ID, BSE_SHORT, PUBLIC_ORIGIN, bseOrigin, isBseHost, isBseHostName, isBseOobPath, isOwnOrigin, requestOrigin } from "./config";
 import { recordSignIn, requestCountry } from "./login-history";
 import { isReserved, usernameProblem } from "./invites";
 import { forgetHeld, handleHeld } from "./held";
@@ -1259,7 +1259,7 @@ async function accountMe(viewer: Viewer): Promise<{ name: string; avatar: string
 		where u.id = ${viewer.id}::bigint`;
 	return { name: u?.name ?? viewer.screen_name, avatar: pfpOf(u?.avatar_url), sq: squareBadge(u?.badge) };
 }
-async function bsePage(title: string, main: string, opts: { status?: number; csrf?: string; description?: string; wide?: boolean; viewer?: Viewer } = {}): Promise<Response> {
+async function bsePage(title: string, main: string, opts: { status?: number; csrf?: string; description?: string; wide?: boolean; viewer?: Viewer; extraCss?: string; robots?: string; referrer?: string; headers?: Record<string, string> } = {}): Promise<Response> {
 	const tape = await marketTape();
 	const me = opts.viewer ? await accountMe(opts.viewer) : null;
 	const chip = me
@@ -1278,7 +1278,9 @@ ${isAdmin(opts.viewer) ? `<a href="/admin">Admin</a>` : ""}
 ${BSE_ICONS}
 <meta name="theme-color" content="#ffffff">
 <meta name="description" content="${esc(opts.description ?? `Your ${BSE_NAME} account.`)}">
-<style>${LOGIN_CSS}${opts.wide ? DEV_CSS : ""}</style></head>
+${opts.robots ? `<meta name="robots" content="${esc(opts.robots)}">` : ""}
+${opts.referrer ? `<meta name="referrer" content="${esc(opts.referrer)}">` : ""}
+<style>${LOGIN_CSS}${opts.wide ? DEV_CSS : ""}${opts.extraCss ?? ""}</style></head>
 <body>
 <header class="bsehead"><a class="wordmark" href="/" aria-label="${esc(BSE_SHORT)}">${BSE_WORDMARK}<span class="bname">${esc(BSE_NAME)}</span></a>${AUTH_NAV}<div class="grow"></div>${chip}</header>
 ${tape}
@@ -1288,8 +1290,108 @@ ${main}
 <p class="fine"><a href="/">${esc(BSE_NAME)}</a> · © 2026 Bloxburg Stock Exchange. Independent community project. Not affiliated with Roblox, Welcome to Bloxburg or the NYSE.</p>
 </body></html>`;
 	const headers = new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
+	if (opts.referrer) headers.set("referrer-policy", opts.referrer);
+	if (opts.robots) headers.set("x-robots-tag", opts.robots);
+	if (opts.headers) for (const [k, v] of Object.entries(opts.headers)) headers.set(k, v);
 	if (opts.csrf) headers.append("set-cookie", loginCsrfCookie(opts.csrf));
 	return new Response(html, { status: opts.status ?? 200, headers });
+}
+
+const OOB_CSS = `.oob h1{font-size:clamp(1.4rem,5vw,1.85rem);line-height:1.2;margin:0 0 12px}
+.oob p.lead{font-size:15px;margin:0 0 18px}
+.oob .field{margin:18px 0}
+.oob .lab{font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.oob .val{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:clamp(1.05rem,3.5vw,1.35rem);line-height:1.45;overflow-wrap:anywhere;word-break:break-all;background:var(--band);padding:14px 16px;margin:8px 0 10px;user-select:all;border:1px solid var(--line)}
+.oob .val.empty{color:var(--mut);font-size:1rem}
+.oob .copied{color:var(--up,#0a7a32);font-weight:600;min-height:1.2em;margin:8px 0 0}
+.oob .fmt{font-size:13px;color:var(--mut);margin-top:16px}
+.oob button{min-height:44px}
+@media(max-width:700px){.oob .btns{flex-direction:column}.oob .btns>*{width:100%}}`;
+const OOB_MAX = 2048;
+function oobParam(url: URL, name: string) {
+	const v = url.searchParams.get(name) ?? "";
+	return v.length > OOB_MAX ? v.slice(0, OOB_MAX) : v;
+}
+function oobField(id: string, label: string, value: string) {
+	const empty = !value;
+	return `<div class="field"><div class="lab">${esc(label)}</div>
+<div class="val${empty ? " empty" : ""}" id="${id}">${empty ? "—" : esc(value)}</div>
+<button type="button" class="btn alt" data-copy="${id}"${empty ? " disabled" : ""}>Copy ${esc(label)}</button></div>`;
+}
+// no-auth page: shows ?code=&state= (or ?error=) so an app without a public callback can receive them by paste
+async function oobCallbackPage(req: Request): Promise<Response> {
+	if (req.method !== "GET" && req.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { allow: "GET, HEAD", "cache-control": "no-store", "referrer-policy": "no-referrer" } });
+	const url = new URL(req.url);
+	const code = oobParam(url, "code");
+	const state = oobParam(url, "state");
+	const error = oobParam(url, "error");
+	const errorDescription = oobParam(url, "error_description");
+	const failed = !!error;
+	const hasValues = failed || !!code || !!state;
+	const copyFmt = failed ? '{"error":"…","error_description":"…"}' : '{"code":"…","state":"…"}';
+	const fields = failed
+		? oobField("oob-error", "error", error) + oobField("oob-error-desc", "error_description", errorDescription)
+		: oobField("oob-code", "code", code) + oobField("oob-state", "state", state);
+	const intro = failed
+		? `<p class="lead">Authorization didn't complete. Copy the error below and paste it into the app (or try again).</p>`
+		: hasValues
+			? `<p class="lead">Copy the values below and paste them into the app that sent you here.</p>`
+			: `<p class="lead">When an app can't receive a redirect itself, it can register this page as its redirect URI. After you approve the app, the authorization code and state appear here so you can paste them in.</p>
+<p class="note">Register one of these exact addresses in <a href="/developers">Developers</a>:<br>
+<code class="i">https://trade.xitter.space/oauth/discord-callback</code><br>
+<code class="i">https://bse.jye.supply/oauth/discord-callback</code><br>
+<code class="i">/oauth/oob</code> is the same page.</p>`;
+	const both = hasValues
+		? `<div class="btns"><button type="button" class="btn" id="oob-copy-both">Copy both</button></div>
+<p class="copied" id="oob-copied" hidden>Copied.</p>
+<p class="fmt">Copy both copies a single JSON object: <code class="i">${esc(copyFmt)}</code>. The app can parse it with <code class="i">JSON.parse</code>.</p>`
+		: `<p class="fmt">When values are shown, <b>Copy both</b> copies a JSON object <code class="i">{"code":"…","state":"…"}</code> (or <code class="i">{"error":"…","error_description":"…"}</code> if authorization failed).</p>`;
+	const script = hasValues
+		? `<script>
+(() => {
+  const status = document.getElementById("oob-copied");
+  const raw = (id) => {
+    const el = document.getElementById(id);
+    if (!el || el.classList.contains("empty")) return "";
+    return el.textContent ?? "";
+  };
+  const copy = async (text) => {
+    try { await navigator.clipboard.writeText(text); }
+    catch {
+      const t = document.createElement("textarea");
+      t.value = text;
+      t.setAttribute("readonly", "");
+      t.style.position = "fixed";
+      t.style.left = "-9999px";
+      document.body.appendChild(t);
+      t.select();
+      document.execCommand("copy");
+      t.remove();
+    }
+    if (status) { status.hidden = false; status.textContent = "Copied."; }
+  };
+  document.querySelectorAll("[data-copy]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-copy");
+      if (id) copy(raw(id));
+    });
+  });
+  document.getElementById("oob-copy-both")?.addEventListener("click", () => {
+    const err = document.getElementById("oob-error");
+    if (err) copy(JSON.stringify({ error: raw("oob-error"), error_description: raw("oob-error-desc") }));
+    else copy(JSON.stringify({ code: raw("oob-code"), state: raw("oob-state") }));
+  });
+})();
+</script>`
+		: "";
+	const main = `<div class="oob"><h1>Paste this into Discord</h1>${intro}${hasValues ? fields : ""}${both}</div>${script}`;
+	return bsePage("Paste this into Discord · BSE", main, {
+		description: "Paste the authorization code into your app.",
+		extraCss: OOB_CSS,
+		robots: "noindex, nofollow",
+		referrer: "no-referrer",
+		headers: { "cache-control": "no-store" },
+	});
 }
 
 async function loginPage(req: Request, opts: { next: string; error?: string; status?: number; challenge?: string; typed?: string; csrf?: string }): Promise<Response> {
@@ -1878,6 +1980,7 @@ export async function bseSite(req: Request, opts: { ip: string }): Promise<Respo
 	const p = url.pathname;
 	if (p === "/favicon.ico") return bsePublicFile("bse-favicon.ico", "image/x-icon");
 	if (p === "/apple-touch-icon.png" || p === "/apple-touch-icon-precomposed.png") return bsePublicFile("bse-apple-touch.png", "image/png");
+	if (isBseOobPath(p)) return oobCallbackPage(req);
 	if (BSE_PASS.some((r) => r.test(p))) return;
 	const viewer = await getViewer(req);
 	if (p === "/login") return bseLogin(req, viewer);
