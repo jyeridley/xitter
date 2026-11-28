@@ -10,13 +10,16 @@
 // inside the client with its side bars (tidy.ts frames /i/markets/embed in the
 // main column); frames, ?embed=1 and link fetchers get the page alone.
 
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Viewer } from "./auth";
-import { getViewer, startSession, sessionCookies, clearedCookies, SECURE } from "./auth";
-import { BSE_HOST, BSE_NAME, BSE_OAUTH_CLIENT_ID, BSE_SHORT, PUBLIC_ORIGIN, bseOrigin, isBseHost, isOwnOrigin, requestOrigin } from "./config";
+import { getViewer, startSession, sessionCookies, clearedCookies, SECURE, sessionKey } from "./auth";
+import { BSE_HOST, BSE_NAME, BSE_SHORT, PUBLIC_ORIGIN, bseOrigin, isBseHost, isOwnOrigin, requestOrigin } from "./config";
 import { recordSignIn } from "./login-history";
+import { passwordStep } from "./password-sign-in";
+import { loadLook, nightModeCookies } from "./themes/api";
+import { answerChallenge } from "./two-factor";
 import { redeemBseAuthorizationCode } from "./oauth";
 import { sql } from "./db";
 import { hateIn } from "./hate";
@@ -912,9 +915,6 @@ function bseNext(raw: string | null): string {
 }
 
 const OAUTH_COOKIE = `${SECURE ? "__Host-" : ""}bse_oauth`;
-const challengeFor = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
-const randomUrl = (bytes = 32) => randomBytes(bytes).toString("base64url");
-
 function signedInOn(session: { token: string; csrf: string; userId: string }, location: string, clearOauth = true, status = 303): Response {
 	const headers = new Headers({ location });
 	for (const c of sessionCookies(session)) headers.append("set-cookie", c);
@@ -927,30 +927,176 @@ function oauthErrorPage(message: string, next: string): Response {
 <body><main><h1>Couldn't sign in</h1><p>${esc(message)}</p><p><a href="/login?next=${encodeURIComponent(next)}">Try again</a> · <a href="/">${esc(BSE_NAME)}</a></p></main></body></html>`;
 	return new Response(html, { status: 400, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
-function oauthCookie(payload: string): string {
-	return `${OAUTH_COOKIE}=${encodeURIComponent(payload)}; Path=/; HttpOnly; Max-Age=600; SameSite=Lax${SECURE}`;
+function sparkline(hist: [number, number][], up: boolean): string {
+	const pts = hist.slice(-40);
+	if (pts.length < 2) return "";
+	const ys = pts.map((p) => p[1]);
+	const min = Math.min(...ys), max = Math.max(...ys), span = max - min || 1;
+	const w = 64, h = 22;
+	const d = pts.map((p, i) => `${((i / (pts.length - 1)) * w).toFixed(1)},${(h - ((p[1] - min) / span) * (h - 2) - 1).toFixed(1)}`).join(" ");
+	return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true"><polyline fill="none" stroke="${up ? "#00ba7c" : "#f4212e"}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" points="${d}"/></svg>`;
 }
-// start Xitter's built-in authorization-code + PKCE flow on Bloxburg Social
+async function marketTape(): Promise<string> {
+	const rows = (await shared()).companies.filter((c) => !c.suspended).sort((a, b) => b.price * b.shares - a.price * a.shares).slice(0, 10);
+	if (!rows.length) return "";
+	const chips = rows
+		.map((c) => {
+			const ch = pct(c.price, c.prevClose);
+			const up = ch >= 0;
+			return `<a class="chip" href="/c/${esc(c.ticker)}"><b>${esc(c.ticker)}</b><span class="num">${esc(fmtP(c.price))}</span><span class="chg ${up ? "up" : "dn"}">${esc(sg(ch))}</span>${sparkline(c.hist, up)}</a>`;
+		})
+		.join("");
+	return `<div class="tape" aria-label="Live market prices"><div class="track">${chips}${chips}</div></div>`;
+}
+
+const LOGIN_CSRF_COOKIE = `${SECURE ? "__Host-" : ""}bse_login`;
+function loginCsrfCookie(token: string): string {
+	return `${LOGIN_CSRF_COOKIE}=${token}; Path=/; HttpOnly; Max-Age=600; SameSite=Lax${SECURE}`;
+}
+function newLoginCsrf(): string {
+	return randomBytes(32).toString("hex");
+}
+function loginCsrfFrom(req: Request): string | undefined {
+	const v = parseCookie(req, LOGIN_CSRF_COOKIE);
+	return v && /^[0-9a-f]{64}$/i.test(v) ? v : undefined;
+}
+function sameCsrf(a: string, b: string): boolean {
+	if (!a || !b) return false;
+	const x = Buffer.from(a), y = Buffer.from(b);
+	return x.length === y.length && x.length > 0 && timingSafeEqual(x, y);
+}
+function validLoginPost(req: Request, csrf: string): boolean {
+	return isOwnOrigin(req.headers.get("origin")) && req.headers.get("origin") === requestOrigin(req) && sameCsrf(parseCookie(req, LOGIN_CSRF_COOKIE) ?? "", csrf);
+}
+
+const LOGIN_CSS = `:root{--bg:#000;--card:#16181c;--line:#2f3336;--txt:#e7e9ea;--mut:#71767b;--hover:rgba(231,233,234,.06);--up:#00ba7c;--dn:#f4212e;--accent:#1d9bf0;--btn:#eff3f4;--btntxt:#0f1419;--field:#000;color-scheme:dark}
+html[data-theme=light]{--bg:#fff;--card:#f7f9f9;--line:#eff3f4;--txt:#0f1419;--mut:#536471;--hover:rgba(15,20,25,.04);--btn:#0f1419;--btntxt:#fff;--field:#fff;color-scheme:light}
+html[data-theme=light] .card,html[data-theme=light] .chip{border-color:#e6ecf0}
+html[data-theme=light] input{border-color:#cfd9de}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--txt);font:15px/1.35 TwitterChirp,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.num{font-variant-numeric:tabular-nums}
+.bsehead{display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:8;background:color-mix(in srgb,var(--bg) 88%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+.wordmark{display:flex;align-items:baseline;gap:10px;color:var(--txt);text-decoration:none;font-weight:800}
+.wordmark:hover{text-decoration:none}
+.wordmark .bse{font-size:22px;letter-spacing:.12em}
+.wordmark .bname{font-size:13px;font-weight:600;color:var(--mut);letter-spacing:0}
+.bsehead .grow{flex:1}
+.bsehead .glink{color:var(--mut);font-size:13px;font-weight:600;white-space:nowrap}
+.tape{border-bottom:1px solid var(--line);overflow:hidden;background:var(--bg)}
+.track{display:flex;gap:8px;width:max-content;padding:8px 16px;animation:tick 40s linear infinite}
+.tape:hover .track{animation-play-state:paused}
+@keyframes tick{to{transform:translateX(-50%)}}
+@media(prefers-reduced-motion:reduce){.track{animation:none;overflow-x:auto;width:auto;max-width:100%;scrollbar-width:none}}
+.chip{display:inline-flex;align-items:center;gap:8px;padding:6px 10px 6px 12px;border:1px solid var(--line);border-radius:999px;color:var(--txt);text-decoration:none;font-size:13px;background:var(--card);white-space:nowrap}
+.chip:hover{text-decoration:none;background:var(--hover)}
+.chip b{letter-spacing:.04em;font-size:12px}
+.chip .chg{font-weight:700;font-variant-numeric:tabular-nums}
+.up{color:var(--up)}.dn{color:var(--dn)}
+.spark{flex:0 0 auto;display:block}
+.wrap{display:grid;place-items:center;padding:32px 16px 48px;min-height:calc(100vh - 120px)}
+.card{width:min(440px,100%);border:1px solid var(--line);border-radius:16px;padding:28px 28px 24px;background:var(--bg)}
+h1{margin:0 0 6px;font-size:26px;letter-spacing:-.02em;font-weight:800}
+.note{margin:0 0 22px;color:var(--mut);font-size:13px}
+label{display:block;margin:0 0 14px}
+label>span{display:block;font-size:13px;color:var(--mut);margin-bottom:6px}
+input{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--txt);font:inherit}
+input:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.error{color:#f4212e;margin:0 0 14px;font-size:14px}
+button{width:100%;min-height:44px;border:0;border-radius:999px;background:var(--btn);color:var(--btntxt);font:inherit;font-weight:700;cursor:pointer;margin-top:4px}
+button:hover{filter:brightness(.92)}
+.links{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:16px 0 0;font-size:13px}
+.links a{color:var(--accent)}
+.back{margin:12px 0 0;text-align:center;font-size:13px}
+.fine{margin:28px 0 0;text-align:center;color:var(--mut);font-size:12px}
+.fine a{color:inherit;text-decoration:underline}
+@media(max-width:600px){.wordmark .bname{display:none}.wrap{padding:24px 12px 40px}.card{padding:22px 18px 20px}}`;
+
+async function loginPage(req: Request, opts: { next: string; error?: string; status?: number; challenge?: string; typed?: string; csrf?: string }): Promise<Response> {
+	const inst = settings().instance_name;
+	const csrf = opts.csrf || loginCsrfFrom(req) || newLoginCsrf();
+	const next = opts.next;
+	const tape = await marketTape();
+	const twoFactor = !!opts.challenge;
+	const title = twoFactor ? `Enter your code · ${BSE_SHORT}` : `Sign in · ${BSE_SHORT}`;
+	const fields = twoFactor
+		? `<input type="hidden" name="challenge" value="${esc(opts.challenge!)}">
+<label><span>Verification code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" autofocus required aria-label="Verification code"></label>`
+		: `<label><span>Username or email</span><input name="username" value="${esc(opts.typed ?? "")}" autocomplete="username" autocapitalize="off" spellcheck="false" maxlength="320" required autofocus></label>
+<label><span>Password</span><input name="password" type="password" autocomplete="current-password" maxlength="1024" required></label>`;
+	const html = `<!DOCTYPE html>
+<html lang="en" data-site="bse"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>${esc(title)}</title>
+<link rel="icon" type="image/png" href="/public/favicon.png">
+<meta name="theme-color" content="#000000">
+<meta name="description" content="Sign in to ${esc(BSE_NAME)} with your ${esc(inst)} account.">
+<script>(function(){var t="dark";try{if(matchMedia("(prefers-color-scheme: light)").matches)t="light"}catch(e){}document.documentElement.setAttribute("data-theme",t);var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content",t==="light"?"#ffffff":"#000000")})()</script>
+<style>${LOGIN_CSS}</style></head>
+<body>
+<header class="bsehead"><a class="wordmark" href="/"><span class="bse">${esc(BSE_SHORT)}</span><span class="bname">${esc(BSE_NAME)}</span></a><div class="grow"></div><a class="glink" href="${esc(PUBLIC_ORIGIN)}">${esc(inst)}</a></header>
+${tape}
+<div class="wrap"><main class="card">
+<h1>${twoFactor ? "Enter your verification code" : `Sign in to ${esc(BSE_SHORT)}`}</h1>
+<p class="note">${twoFactor ? `Open your authenticator app and enter the code for ${esc(inst)}, or use a backup code.` : `Uses your ${esc(inst)} account.`}</p>
+${opts.error ? `<p class="error" role="alert">${esc(opts.error)}</p>` : ""}
+<form method="post" action="/login" autocomplete="on">
+<input type="hidden" name="csrf" value="${esc(csrf)}">
+<input type="hidden" name="next" value="${esc(next)}">
+${fields}
+<button type="submit">${twoFactor ? "Verify" : "Sign in"}</button>
+</form>
+${twoFactor ? `<p class="back"><a href="/login?next=${encodeURIComponent(next)}">Back to sign in</a></p>` : `<p class="links"><a href="${esc(PUBLIC_ORIGIN)}/account/forgot">Forgot password</a><a href="${esc(PUBLIC_ORIGIN)}/i/flow/signup">Create a ${esc(inst)} account</a></p>`}
+</main></div>
+<p class="fine">${esc(inst)} account · <a href="/">${esc(BSE_NAME)}</a></p>
+</body></html>`;
+	const headers = new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
+	headers.append("set-cookie", loginCsrfCookie(csrf));
+	return new Response(html, { status: opts.status ?? 200, headers });
+}
+
+async function finishBseSignIn(req: Request, session: { token: string; csrf: string; userId: string }, next: string): Promise<Response> {
+	const [u] = await sql`select status from users where id = ${session.userId}::bigint`;
+	if (u?.status === "suspended") {
+		await sql`delete from sessions where token = ${sessionKey(session.token)}`;
+		return loginPage(req, { next, error: "This account is suspended.", status: 403 });
+	}
+	try {
+		await recordSignIn(req, session);
+		const res = signedInOn(session, next);
+		for (const c of nightModeCookies(await loadLook(session.userId))) res.headers.append("set-cookie", c);
+		res.headers.append("set-cookie", `${LOGIN_CSRF_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${SECURE}`);
+		return res;
+	} catch {
+		return loginPage(req, { next, error: "That account can't sign in right now.", status: 403 });
+	}
+}
+
 async function bseLogin(req: Request, viewer: Viewer | undefined): Promise<Response> {
 	const url = new URL(req.url);
-	const next = bseNext(url.searchParams.get("next"));
-	if (viewer) return Response.redirect(next, 302);
-	const redirect = `${isBseHost(req) ? requestOrigin(req) : bseOrigin()}/auth/callback`;
-	const state = randomUrl(24), verifier = randomUrl(32);
-	const payload = Buffer.from(JSON.stringify({ state, verifier, next, redirect }), "utf8").toString("base64url");
-	const params = new URLSearchParams({
-		response_type: "code",
-		client_id: BSE_OAUTH_CLIENT_ID,
-		redirect_uri: redirect,
-		scope: "write",
-		state,
-		code_challenge: challengeFor(verifier),
-		code_challenge_method: "S256",
-	});
-	const headers = new Headers({ location: `${PUBLIC_ORIGIN}/oauth/authorize?${params}`, "cache-control": "no-store" });
-	headers.append("set-cookie", oauthCookie(payload));
-	return new Response(null, { status: 302, headers });
+	if (viewer) return Response.redirect(bseNext(url.searchParams.get("next")), 302);
+	if (req.method === "GET" || req.method === "HEAD") return loginPage(req, { next: bseNext(url.searchParams.get("next")) });
+	if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+	const form = await req.formData().catch(() => undefined);
+	const field = (k: string) => String(form?.get(k) ?? "");
+	const next = bseNext(field("next") || url.searchParams.get("next"));
+	if (!form || !validLoginPost(req, field("csrf"))) return loginPage(req, { next, error: "That sign-in form expired. Try again.", status: 403, typed: field("username") });
+	const h = hit("auth", optsIp(req));
+	if (!h.ok) return limitedResponse(h);
+	if (field("challenge")) {
+		const answered = await answerChallenge(field("challenge"), field("code").trim());
+		if (answered.session) return finishBseSignIn(req, answered.session, next);
+		if (answered.unknown) return loginPage(req, { next, error: "That sign-in took too long. Enter your password again.", status: 401 });
+		return loginPage(req, { next, error: answered.error ?? "That code isn't right.", status: 401, challenge: answered.error?.startsWith("Too many") ? undefined : field("challenge") });
+	}
+	const step = await passwordStep(field("username"), field("password"));
+	if ("challenge" in step) return loginPage(req, { next, challenge: step.challenge });
+	if ("error" in step) return loginPage(req, { next, error: step.error, status: step.error.startsWith("Too many") ? 429 : 401, typed: field("username").trim() });
+	return finishBseSignIn(req, step.session, next);
 }
+
+
+// leftover OAuth callback from earlier handoff links still works
 async function bseAuthCallback(req: Request): Promise<Response> {
 	const url = new URL(req.url);
 	const nextGuess = bseNext(url.searchParams.get("next"));
