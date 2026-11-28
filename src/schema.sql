@@ -2081,3 +2081,11 @@ alter table users add column if not exists bse_only boolean not null default fal
 alter table users add column if not exists bse_link_id bigint references users (id) on delete set null;
 alter table users add column if not exists bse_linked_at timestamptz;
 create unique index if not exists users_bse_link_key on users (bse_link_id) where bse_link_id is not null;
+
+-- BSE: sign in with Discord (additive): the Discord user id an account is linked to
+-- (or was made from), its picture, and whether the account has no password of its own
+alter table users add column if not exists discord_id text;
+alter table users add column if not exists discord_avatar text;
+alter table users add column if not exists discord_linked_at timestamptz;
+alter table users add column if not exists bse_passwordless boolean not null default false;
+create unique index if not exists users_discord_id_key on users (discord_id) where discord_id is not null;

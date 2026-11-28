@@ -199,11 +199,11 @@ async function loadShared(): Promise<Shared> {
 	// who holds each company and its latest trades, public on its page: a BSE-only
 	// account shows its linked social account's picture and checkmark
 	const PERSON = sql`u.screen_name as handle, u.name, u.bse_only, case when u.bse_only then l.verified_type else u.verified_type end as badge,
-		case when u.bse_only then l.avatar_url else u.avatar_url end as avatar, l.screen_name as link`;
+		case when u.bse_only then coalesce(l.avatar_url, u.discord_avatar) else u.avatar_url end as avatar, l.screen_name as link`;
 	const [rows, hist, index, headlines, events, gap, holders, trades] = await Promise.all([
 		sql`select c.id::text, c.name, c.ticker, c.logo_v, c.logo is not null as has_logo, c.price::float8, c.prev_close::float8, c.shares::float8, c.volume::float8, (extract(epoch from c.listed_at) * 1000)::float8 as listed, c.suspended,
 			coalesce(c.sector, '') as sector, coalesce(c.description, '') as description, u.id::text as owner_id, u.screen_name as owner_handle, u.name as owner_name, u.bse_only as owner_bse, l.screen_name as owner_link,
-			case when u.bse_only then l.verified_type else u.verified_type end as owner_badge, case when u.bse_only then l.avatar_url else u.avatar_url end as owner_avatar
+			case when u.bse_only then l.verified_type else u.verified_type end as owner_badge, case when u.bse_only then coalesce(l.avatar_url, u.discord_avatar) else u.avatar_url end as owner_avatar
 			from market_companies c left join users u on u.id = c.owner_id and u.status <> 'suspended' and u.deactivated_at is null
 			left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null order by c.id`,
 		sql`select company_id::text as c, (extract(epoch from t) * 1000)::float8 as t, price::float8 as p from (select company_id, t, price, id, row_number() over (partition by company_id order by id desc) rn from market_history) x where rn <= ${HIST_SENT} order by company_id, id`,
@@ -269,7 +269,7 @@ async function account(viewer: Viewer) {
 	const on = moneyOn();
 	const [[u], holdings, txns, [owned]] = await Promise.all([
 		sql`select u.status, u.name, u.bse_only, case when u.bse_only then l.verified_type else u.verified_type end as verified_type,
-			case when u.bse_only then l.avatar_url else u.avatar_url end as avatar_url, l.screen_name as link_handle
+			case when u.bse_only then coalesce(l.avatar_url, u.discord_avatar) else u.avatar_url end as avatar_url, l.screen_name as link_handle
 			from users u left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null where u.id = ${viewer.id}`,
 		sql`select company_id::text as id, qty, cost from market_holdings where user_id = ${viewer.id}`,
 		sql`select side, ticker, qty, price::float8, coalesce(total_cents::float8 / 100, total::float8) as total, (extract(epoch from created_at) * 1000)::float8 as t from market_txns where user_id = ${viewer.id} order by id desc limit 100`,
@@ -1100,6 +1100,11 @@ label i{font-style:normal;font-weight:400;color:var(--mut)}
 .btn.alt,button.alt{background:#fff;color:#000}
 .btn.alt:hover,button.alt:hover{background:var(--band)}
 .ok{color:var(--up);margin:0 0 14px;font-size:14px}
+.btn.discord{margin-top:10px;background:#5865f2;border-color:#5865f2;gap:10px}
+.btn.discord:hover{background:#4752c4;border-color:#4752c4}
+.btn.discord svg{width:20px;height:20px;fill:#fff}
+input.pw{display:block;width:100%;margin:6px 0 10px}
+.linked.dc img:first-child{border-radius:50%}
 h2{font-size:1.1rem;margin:22px 0 10px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink)}
 .facts{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;margin:8px 0 6px;font-size:15px}
 .facts dt{color:var(--mut);font-weight:600;font-size:13px;padding-top:2px}
@@ -1164,6 +1169,7 @@ ${twoFactor
 	? `<p class="back"><a href="/login${q}">Back to sign in</a></p>`
 	: `<div class="or"><span>or</span></div>
 <a class="btn alt" href="/auth/bs${q}">Sign in with ${esc(inst)}</a>
+${discordOn() ? `<a class="btn discord" href="/auth/discord/start${q}">${DISCORD_MARK}Sign in with Discord</a>` : ""}
 <p class="links"><a href="/signup${q}">Create a BSE account</a><a href="${esc(PUBLIC_ORIGIN)}/account/forgot">Forgot a ${esc(inst)} password</a></p>`}`;
 	return bsePage(title, main, { status: opts.status, csrf, description: `Sign in to ${BSE_NAME} with a BSE account or your ${inst} account.` });
 }
@@ -1271,10 +1277,17 @@ const ACCOUNT_NOTES: Record<string, [string, boolean]> = {
 	self: ["That account can't be linked.", true],
 	expired: ["That took too long. Try linking again.", true],
 	failed: ["Bloxburg Social didn't finish signing in. Try again.", true],
+	dlinked: ["Your Discord account is linked.", false],
+	dunlinked: ["Your Discord account is unlinked.", false],
+	dtaken: ["That Discord account is already linked to another BSE account.", true],
+	dfailed: ["Discord didn't finish signing in. Try again.", true],
+	lastway: ["Add a password or link another account first: that's your only way to sign in.", true],
+	pwset: ["Your password is saved.", false],
+	pwbad: ["Passwords are 8 to 256 characters and have to match.", true],
 };
 async function accountPage(req: Request, viewer: Viewer): Promise<Response> {
 	const inst = settings().instance_name;
-	const [u] = await sql`select u.screen_name, u.name, u.bse_only, u.created_at, u.bse_linked_at,
+	const [u] = await sql`select u.screen_name, u.name, u.bse_only, u.created_at, u.bse_linked_at, u.discord_id, u.discord_avatar, u.discord_linked_at, u.bse_passwordless,
 			l.screen_name as l_handle, l.name as l_name, l.avatar_url as l_avatar, l.verified_type as l_badge
 		from users u left join users l on l.id = u.bse_link_id where u.id = ${viewer.id}::bigint`;
 	const m = ACCOUNT_NOTES[new URL(req.url).searchParams.get("m") ?? ""];
@@ -1291,8 +1304,16 @@ async function accountPage(req: Request, viewer: Viewer): Promise<Response> {
 <form method="post" action="/account/unlink"><input type="hidden" name="csrf" value="${esc(viewer.csrf)}"><button type="submit" class="alt">Unlink ${esc(inst)} account</button></form>`
 			: `<p class="note">Link a ${esc(inst)} account to show its picture and checkmark here and to sign in with it. You'll sign in on ${esc(inst)} to prove it's yours.</p>
 <a class="btn" href="/auth/bs?link=1">Link a ${esc(inst)} account</a>`;
+		const csrfIn = `<input type="hidden" name="csrf" value="${esc(viewer.csrf)}">`;
+		const discordBlock = u.discord_id
+			? `<div class="linked dc"><img src="${esc(u.discord_avatar || DEFAULT_PFP)}" alt=""><div><b>Discord</b><div class="note">Linked ${esc(new Date(u.discord_linked_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }))}. "Sign in with Discord" signs in to this account.</div></div></div>
+<form method="post" action="/account/discord/unlink">${csrfIn}<button type="submit" class="alt">Unlink Discord</button></form>`
+			: `<p class="note">Link your Discord account to sign in with it. Only your Discord name and picture are read.</p>
+<a class="btn discord" href="/auth/discord/start?link=1">${DISCORD_MARK}Link Discord</a>`;
+		const passwordForm = `<p class="note">This account was made with Discord and has no password. Add one to also sign in with your handle.</p>
+<form method="post" action="/account/password">${csrfIn}<label><span>Password</span><input class="pw" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label><label><span>Confirm password</span><input class="pw" name="password2" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label><button type="submit">Save password</button></form>`;
 		body = `<dl class="facts"><dt>Name</dt><dd>${esc(u.name)}</dd><dt>Handle</dt><dd>@${esc(u.screen_name)} <span class="tag">BSE account</span></dd><dt>Joined</dt><dd>${esc(new Date(u.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }))}</dd></dl>
-<h2>${esc(inst)} account</h2>${linked}`;
+<h2>${esc(inst)} account</h2>${linked}${discordOn() || u.discord_id ? `<h2>Discord account</h2>${discordBlock}` : ""}${u.bse_passwordless ? `<h2>Password</h2>${passwordForm}` : ""}`;
 	} else {
 		body = `<dl class="facts"><dt>Name</dt><dd>${esc(u.name)}</dd><dt>Handle</dt><dd>@${esc(u.screen_name)} <span class="tag">${esc(inst)} account</span></dd></dl>
 <p class="note">You sign in to ${esc(BSE_SHORT)} with your ${esc(inst)} account. Your balance, holdings and companies stay tied to it. Change your picture, name or password on <a href="${esc(PUBLIC_ORIGIN)}/settings/account">${esc(inst)}</a>.</p>`;
@@ -1312,7 +1333,25 @@ async function bseAccountRoute(req: Request, viewer: Viewer | undefined, p: stri
 	const form = await req.formData().catch(() => undefined);
 	const origin = req.headers.get("origin");
 	if (!form || origin !== requestOrigin(req) || !sameCsrf(String(form.get("csrf") ?? ""), viewer.csrf)) return new Response("This form expired. Go back and try again.", { status: 403 });
-	await sql`update users set bse_link_id = null, bse_linked_at = null where id = ${viewer.id}::bigint and bse_only`;
+	if (p === "/account/password") {
+		const pw = String(form.get("password") ?? ""), pw2 = String(form.get("password2") ?? "");
+		if (pw.length < 8 || pw.length > 256 || pw !== pw2) return Response.redirect("/account?m=pwbad", 303);
+		const hash = await Bun.password.hash(pw);
+		await sql`update users set password_hash = ${hash}, bse_passwordless = false where id = ${viewer.id}::bigint and bse_only and bse_passwordless`;
+		return Response.redirect("/account?m=pwset", 303);
+	}
+	// an account made with Discord has no password until one is added: whichever
+	// way is unlinked, one other way to sign in has to be left
+	if (p === "/account/discord/unlink") {
+		const done = await sql`update users set discord_id = null, discord_avatar = null, discord_linked_at = null where id = ${viewer.id}::bigint and bse_only and discord_id is not null
+			and (not bse_passwordless or bse_link_id is not null) returning id`;
+		if (!done.length) return Response.redirect("/account?m=lastway", 303);
+		changed++;
+		return Response.redirect("/account?m=dunlinked", 303);
+	}
+	const done = await sql`update users set bse_link_id = null, bse_linked_at = null where id = ${viewer.id}::bigint and bse_only and bse_link_id is not null
+		and (not bse_passwordless or discord_id is not null) returning id`;
+	if (!done.length) return Response.redirect("/account?m=lastway", 303);
 	changed++;
 	return Response.redirect("/account?m=unlinked", 303);
 }
@@ -1357,6 +1396,154 @@ async function bseLogin(req: Request, viewer: Viewer | undefined): Promise<Respo
 	return finishBseSignIn(req, step.session, next);
 }
 
+
+// ---------- Sign in with Discord: authorization code + PKCE, scope identify only ----------
+// the API base can be pointed at a stand-in when testing
+const DISCORD_API = (process.env.DISCORD_API_BASE ?? "https://discord.com/api").replace(/\/$/, "");
+const DISCORD_COOKIE = `${SECURE ? "__Host-" : ""}bse_discord`;
+const DISCORD_MARK = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-4.500L12 21l-2.500-3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/><circle cx="8.800" cy="11" r="1.600" fill="#5865f2"/><circle cx="15.200" cy="11" r="1.600" fill="#5865f2"/></svg>`;
+const discordKeys = () => ({ id: (process.env.DISCORD_CLIENT_ID ?? "").trim(), secret: (process.env.DISCORD_CLIENT_SECRET ?? "").trim() });
+const discordOn = () => { const k = discordKeys(); return !!k.id && !!k.secret; };
+const clearDiscordCookie = `${DISCORD_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${SECURE}`;
+
+async function discordStart(req: Request, viewer: Viewer | undefined): Promise<Response> {
+	const url = new URL(req.url);
+	const link = url.searchParams.has("link");
+	const next = link ? "/account" : bseNext(url.searchParams.get("next"));
+	if (!discordOn()) return oauthErrorPage("Sign in with Discord isn't set up here.", next);
+	if (link && !viewer) return Response.redirect(`/login?next=${encodeURIComponent("/account")}`, 302);
+	if (link && !viewer!.bse_only) return Response.redirect("/account", 302);
+	if (!link && viewer) return Response.redirect(next, 302);
+	const redirect = `${requestOrigin(req)}/auth/discord/callback`;
+	const state = urlRandom(24), verifier = urlRandom(32);
+	const payload = Buffer.from(JSON.stringify({ state, verifier, next, redirect, mode: link ? "link" : "signin", uid: link ? viewer!.id : null }), "utf8").toString("base64url");
+	const params = new URLSearchParams({ response_type: "code", client_id: discordKeys().id, scope: "identify", redirect_uri: redirect, state, code_challenge: challengeFor(verifier), code_challenge_method: "S256" });
+	const headers = new Headers({ location: `https://discord.com/oauth2/authorize?${params}`, "cache-control": "no-store" });
+	headers.append("set-cookie", `${DISCORD_COOKIE}=${encodeURIComponent(payload)}; Path=/; HttpOnly; Max-Age=600; SameSite=Lax${SECURE}`);
+	return new Response(null, { status: 302, headers });
+}
+
+// the Discord user behind an authorization code: id, names, avatar. Nothing else is asked for or kept.
+async function discordIdentity(code: string, redirect: string, verifier: string): Promise<{ id: string; username: string; globalName: string | null; avatar: string | null } | undefined> {
+	const k = discordKeys();
+	try {
+		const t = await fetch(`${DISCORD_API}/oauth2/token`, {
+			method: "POST",
+			headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+			body: new URLSearchParams({ client_id: k.id, client_secret: k.secret, grant_type: "authorization_code", code, redirect_uri: redirect, code_verifier: verifier }),
+			signal: AbortSignal.timeout(10_000),
+		});
+		if (!t.ok) return undefined;
+		const tok = (await t.json()) as { access_token?: string };
+		if (!tok.access_token) return undefined;
+		const me = await fetch(`${DISCORD_API}/users/@me`, { headers: { authorization: `Bearer ${tok.access_token}`, accept: "application/json" }, signal: AbortSignal.timeout(10_000) });
+		// let go of the token: it was only needed for this one lookup
+		fetch(`${DISCORD_API}/oauth2/token/revoke`, {
+			method: "POST",
+			headers: { "content-type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({ client_id: k.id, client_secret: k.secret, token: tok.access_token, token_type_hint: "access_token" }),
+			signal: AbortSignal.timeout(5_000),
+		}).catch(() => {});
+		if (!me.ok) return undefined;
+		const u = (await me.json()) as { id?: string; username?: string; global_name?: string | null; avatar?: string | null };
+		if (!u.id || !/^\d{15,25}$/.test(u.id) || typeof u.username !== "string") return undefined;
+		const avatar = u.avatar && /^(a_)?[0-9a-f]{16,40}$/.test(u.avatar) ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=128` : null;
+		return { id: u.id, username: u.username, globalName: typeof u.global_name === "string" ? u.global_name : null, avatar };
+	} catch {
+		return undefined;
+	}
+}
+
+// a free handle from a Discord username, by the same rules as signing up: letters, digits and
+// underscores, 3 to 15 long, not reserved, held, blocked or taken; a number is added when it's taken
+async function freeHandle(username: string): Promise<string> {
+	const clean = username.normalize("NFKD").replace(/[^A-Za-z0-9_]+/g, "").replace(/^_+|_+$/g, "");
+	let base = clean.slice(0, 15);
+	if (base.length < 3) base = (base + "bse").slice(0, 8);
+	const ok = async (h: string) => !usernameProblem(h) && !isReserved(h) && !(await handleHeld(h)) && !blockedNameIn(h, h) && !hateInName(h, h)
+		&& !(await sql`select 1 from users where lower(screen_name) = lower(${h})`).length;
+	if (await ok(base)) return base;
+	for (let i = 0; i < 40; i++) {
+		const digits = i < 20 ? 2 : i < 30 ? 3 : 4;
+		const suffix = String(Math.floor(Math.random() * 10 ** digits)).padStart(digits, "0");
+		const h = base.slice(0, 15 - suffix.length) + suffix;
+		if (await ok(h)) return h;
+	}
+	return "bse" + randomBytes(5).toString("hex").slice(0, 10);
+}
+
+async function discordCreate(d: { id: string; username: string; globalName: string | null; avatar: string | null }): Promise<string | undefined> {
+	if (settings().signup_mode === "closed") return undefined;
+	for (let tries = 0; tries < 5; tries++) {
+		const handle = await freeHandle(d.username);
+		let name = (d.globalName ?? d.username).trim().replace(/\s+/g, " ");
+		if (looksBlank(name) || name.length > NAME_MAX || blockedNameIn(handle, name) || hateInName(handle, name) || forbiddenText(name)) name = handle;
+		const id = newId();
+		// no password to type: the stored one is a hash of random bytes nobody has
+		const hash = await Bun.password.hash(randomBytes(32).toString("hex"));
+		try {
+			await sql`insert into users (id, screen_name, name, password_hash, bse_only, bse_passwordless, signup_source, discord_id, discord_avatar, discord_linked_at)
+				values (${id}::bigint, ${handle}, ${name}, ${hash}, true, true, 'BSE', ${d.id}, ${d.avatar}, now())`;
+			forgetHeld();
+			return id;
+		} catch {
+			// the handle was taken a moment ago, or this Discord account was just made by another request
+			const [again] = await sql`select id::text from users where discord_id = ${d.id}`;
+			if (again) return again.id;
+		}
+	}
+	return undefined;
+}
+
+async function discordCallback(req: Request): Promise<Response> {
+	const url = new URL(req.url);
+	let stored: { state?: string; verifier?: string; next?: string; redirect?: string; mode?: string; uid?: string | null } | undefined;
+	try {
+		const raw = parseCookie(req, DISCORD_COOKIE);
+		if (raw) stored = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+	} catch {}
+	const next = bseNext(stored?.next ?? "/");
+	const linking = stored?.mode === "link";
+	const back = (m: string) => {
+		const headers = new Headers({ location: `/account?m=${m}` });
+		headers.append("set-cookie", clearDiscordCookie);
+		return new Response(null, { status: 303, headers });
+	};
+	const bad = (message: string) => { const r = oauthErrorPage(message, next); r.headers.append("set-cookie", clearDiscordCookie); return r; };
+	if (url.searchParams.get("error") === "access_denied") return linking ? back("dfailed") : bad("You cancelled signing in.");
+	if (url.searchParams.get("error")) return linking ? back("dfailed") : bad("Discord couldn't authorize this sign-in.");
+	const code = url.searchParams.get("code") ?? "", state = url.searchParams.get("state") ?? "";
+	if (!stored?.verifier || !stored.redirect || !code || !state || !sameCsrf(state, stored.state ?? "")) return linking ? back("expired") : bad("That sign-in expired. Try again.");
+	const d = await discordIdentity(code, stored.redirect, stored.verifier);
+	if (!d) return linking ? back("dfailed") : bad("Discord didn't finish authorizing this sign-in.");
+	if (linking) {
+		const viewer = await getViewer(req);
+		if (!viewer || !viewer.bse_only || viewer.id !== stored.uid) return back("expired");
+		try {
+			const done = await sql`update users set discord_id = ${d.id}, discord_avatar = ${d.avatar}, discord_linked_at = now() where id = ${viewer.id}::bigint and bse_only and discord_id is null
+				and not exists (select 1 from users o where o.discord_id = ${d.id}) returning id`;
+			if (!done.length) return back("dtaken");
+		} catch {
+			return back("dtaken");
+		}
+		changed++;
+		return back("dlinked");
+	}
+	let [found] = await sql`select id::text, status from users where discord_id = ${d.id} and bse_only and deactivated_at is null`;
+	if (found?.status === "suspended") return bad("This account is suspended.");
+	let userId: string | undefined = found?.id;
+	if (userId) await sql`update users set discord_avatar = ${d.avatar} where id = ${userId}::bigint and discord_avatar is distinct from ${d.avatar}`;
+	else userId = await discordCreate(d);
+	if (!userId) return bad(settings().signup_mode === "closed" ? "Sign-up is closed right now." : "Couldn't make your account. Try again.");
+	try {
+		const session = await startSession(userId);
+		const res = await finishBseSignIn(req, session, next);
+		res.headers.append("set-cookie", clearDiscordCookie);
+		return res;
+	} catch {
+		return bad("That account can't sign in right now.");
+	}
+}
 
 // back from Bloxburg Social: sign in (to the BSE account linked to it, or the
 // social account itself, as before), or link it to the signed-in BSE account
@@ -1447,7 +1634,9 @@ export async function bseSite(req: Request, opts: { ip: string }): Promise<Respo
 	if (p === "/login") return bseLogin(req, viewer);
 	if (p === "/signup" || p === "/join") return bseSignupRoute(req, viewer);
 	if (p === "/auth/bs") return bseAuthStart(req, viewer);
-	if (p === "/account" || p === "/settings" || p === "/account/unlink") return bseAccountRoute(req, viewer, p);
+	if (p === "/auth/discord/start") return discordStart(req, viewer);
+	if (p === "/auth/discord/callback") return discordCallback(req);
+	if (p === "/account" || p === "/settings" || p === "/account/unlink" || p === "/account/discord/unlink" || p === "/account/password") return bseAccountRoute(req, viewer, p);
 	if (p === "/auth" || p === "/auth/" || p === "/auth/callback" || p === "/auth/callback/") return bseAuthCallback(req);
 	if (p === "/logout") return bseLogout(url.searchParams.get("next") ?? "/");
 	if (p === MARKETS_PATH || p.startsWith(`${MARKETS_PATH}/`)) {
