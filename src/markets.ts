@@ -191,12 +191,16 @@ const pfpOf = (url: string | null | undefined): string => {
 };
 // organisations and governments have square pictures across the site, people round ones (model.ts pictureShape)
 const squareBadge = (t: string | null | undefined) => t === "business" || t === "government";
-type Company = { id: string; name: string; ticker: string; logo: string; img: string; sq: boolean; price: number; prevClose: number; shares: number; volume: number; listed: number; suspended: boolean; sector: string; description: string; owner: Owner | null; hist: [number, number][] };
+type Company = { id: string; name: string; ticker: string; logo: string; img: string; sq: boolean; price: number; prevClose: number; shares: number; volume: number; listed: number; suspended: boolean; sector: string; description: string; owner: Owner | null; holders: any[]; holderCount: number; trades: any[]; hist: [number, number][] };
 type Shared = { companies: Company[]; index: [number, number][]; headlines: any[]; events: any[]; gap: number };
 let cache: { key: number; at: number; value: Promise<Shared> } | undefined;
 
 async function loadShared(): Promise<Shared> {
-	const [rows, hist, index, headlines, events, gap] = await Promise.all([
+	// who holds each company and its latest trades, public on its page: a BSE-only
+	// account shows its linked social account's picture and checkmark
+	const PERSON = sql`u.screen_name as handle, u.name, u.bse_only, case when u.bse_only then l.verified_type else u.verified_type end as badge,
+		case when u.bse_only then l.avatar_url else u.avatar_url end as avatar, l.screen_name as link`;
+	const [rows, hist, index, headlines, events, gap, holders, trades] = await Promise.all([
 		sql`select c.id::text, c.name, c.ticker, c.logo_v, c.logo is not null as has_logo, c.price::float8, c.prev_close::float8, c.shares::float8, c.volume::float8, (extract(epoch from c.listed_at) * 1000)::float8 as listed, c.suspended,
 			coalesce(c.sector, '') as sector, coalesce(c.description, '') as description, u.id::text as owner_id, u.screen_name as owner_handle, u.name as owner_name, u.bse_only as owner_bse, l.screen_name as owner_link,
 			case when u.bse_only then l.verified_type else u.verified_type end as owner_badge, case when u.bse_only then l.avatar_url else u.avatar_url end as owner_avatar
@@ -207,7 +211,24 @@ async function loadShared(): Promise<Shared> {
 		sql`select id::text, text, cat, ticker, breaking, (extract(epoch from created_at) * 1000)::float8 as t from market_headlines order by id desc limit 100`,
 		sql`select id::text, name, detail, (extract(epoch from created_at) * 1000)::float8 as t from market_events order by id desc limit 100`,
 		sql`select value from market_state where key = 'gap'`,
+		sql`select x.c, x.qty, x.n, ${PERSON} from (select company_id::text as c, user_id, qty, count(*) over (partition by company_id)::int as n,
+				row_number() over (partition by company_id order by qty desc, user_id) as rn
+				from market_holdings h where qty > 0 and exists (select 1 from users v where v.id = h.user_id and v.status <> 'suspended' and v.deactivated_at is null)) x
+			join users u on u.id = x.user_id left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null
+			where x.rn <= 25 order by x.c, x.qty desc`,
+		sql`select x.ticker, x.side, x.qty, x.price::float8 as price, (extract(epoch from x.created_at) * 1000)::float8 as t, ${PERSON}
+			from (select ticker, side, qty, price, created_at, user_id, row_number() over (partition by ticker order by id desc) as rn from market_txns where created_at > now() - interval '30 days') x
+			join users u on u.id = x.user_id left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null
+			where x.rn <= 15 and u.status <> 'suspended' and u.deactivated_at is null order by x.ticker, x.created_at desc`,
 	]);
+	const person = (r: any) => ({ handle: r.handle, name: r.name, bse: !!r.bse_only, link: r.link ?? null, badge: r.badge ?? null, avatar: pfpOf(r.avatar), sq: squareBadge(r.badge) });
+	const holdersBy = new Map<string, { list: any[]; n: number }>();
+	for (const r of holders) {
+		const e = holdersBy.get(r.c) ?? holdersBy.set(r.c, { list: [], n: r.n }).get(r.c)!;
+		e.list.push({ ...person(r), qty: r.qty });
+	}
+	const tradesBy = new Map<string, any[]>();
+	for (const r of trades) (tradesBy.get(r.ticker) ?? tradesBy.set(r.ticker, []).get(r.ticker)!).push({ ...person(r), side: r.side, qty: r.qty, price: r.price, t: r.t });
 	const byCo = new Map<string, [number, number][]>();
 	for (const h of hist) (byCo.get(h.c) ?? byCo.set(h.c, []).get(h.c)!).push([h.t, h.p]);
 	return {
@@ -221,6 +242,9 @@ async function loadShared(): Promise<Shared> {
 			price: c.price, prevClose: c.prev_close, shares: c.shares, volume: c.volume, listed: c.listed, suspended: c.suspended,
 			sector: c.sector, description: c.description,
 			owner,
+			holders: holdersBy.get(c.id)?.list ?? [],
+			holderCount: holdersBy.get(c.id)?.n ?? 0,
+			trades: tradesBy.get(c.ticker) ?? [],
 			hist: byCo.get(c.id) ?? [],
 		};
 		}),
@@ -1061,6 +1085,11 @@ button:hover{background:#222}
 .links{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:16px 0 0;font-size:13px}
 .links a{color:var(--deep)}
 .back{margin:12px 0 0;text-align:center;font-size:13px}
+label>span.at{display:flex;align-items:center;border:1px solid var(--line);background:#fff;font-size:inherit;font-weight:400;color:var(--ink);margin:0}
+label .at b{padding:0 2px 0 12px;color:var(--mut);font-weight:600}
+label .at input{border:0;padding-left:2px}
+label .at:focus-within{border-color:#000;box-shadow:0 0 0 3px var(--accent)}
+label .at input:focus{box-shadow:none}
 label small{display:block;margin-top:6px;color:var(--mut);font-size:12px}
 label i{font-style:normal;font-weight:400;color:var(--mut)}
 .note.small{font-size:12.5px;margin:-2px 0 16px}
@@ -1119,7 +1148,7 @@ async function loginPage(req: Request, opts: { next: string; error?: string; sta
 	const fields = twoFactor
 		? `<input type="hidden" name="challenge" value="${esc(opts.challenge!)}">
 <label><span>Verification code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" autofocus required aria-label="Verification code"></label>`
-		: `<label><span>Username</span><input name="username" value="${esc(opts.typed ?? "")}" autocomplete="username" autocapitalize="off" spellcheck="false" maxlength="320" required autofocus></label>
+		: `<label><span>Handle</span><input name="username" value="${esc(opts.typed ?? "")}" autocomplete="username" autocapitalize="off" spellcheck="false" maxlength="320" required autofocus></label>
 <label><span>Password</span><input name="password" type="password" autocomplete="current-password" maxlength="1024" required></label>`;
 	const q = `?next=${encodeURIComponent(next)}`;
 	const main = `<h1>${twoFactor ? "Enter your verification code" : `Sign in to ${esc(BSE_SHORT)}`}</h1>
@@ -1149,8 +1178,8 @@ ${opts.error ? `<p class="error" role="alert">${esc(opts.error)}</p>` : ""}
 <form method="post" action="/signup" autocomplete="on">
 <input type="hidden" name="csrf" value="${esc(csrf)}">
 <input type="hidden" name="next" value="${esc(opts.next)}">
-<label><span>Username</span><input name="username" value="${esc(opts.typed?.username ?? "")}" autocomplete="username" autocapitalize="off" spellcheck="false" minlength="3" maxlength="15" pattern="[A-Za-z0-9_]{3,15}" required autofocus aria-describedby="un-help"><small id="un-help">3–15 letters, digits or underscores. Usernames are shared with ${esc(inst)}, so a taken handle can't be used.</small></label>
-<label><span>Display name <i>optional</i></span><input name="name" value="${esc(opts.typed?.name ?? "")}" autocomplete="nickname" maxlength="${NAME_MAX}"></label>
+<label><span>Name</span><input name="name" value="${esc(opts.typed?.name ?? "")}" autocomplete="name" maxlength="${NAME_MAX}" required autofocus aria-describedby="nm-help"><small id="nm-help">Shown on your portfolio, companies and trades.</small></label>
+<label><span>Handle</span><span class="at"><b>@</b><input name="username" value="${esc(opts.typed?.username ?? "")}" autocomplete="username" autocapitalize="off" spellcheck="false" minlength="3" maxlength="15" pattern="@?[A-Za-z0-9_]{3,15}" required aria-describedby="un-help"></span><small id="un-help">3–15 letters, digits or underscores; you sign in with it. Handles are shared with ${esc(inst)}, so one that's taken there can't be used.</small></label>
 <label><span>Password</span><input name="password" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
 <label><span>Confirm password</span><input name="password2" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
 <p class="note small">A BSE account has no email, so it can't be reset by email. Link a ${esc(inst)} account in settings to be able to sign in with it too.</p>
@@ -1165,7 +1194,8 @@ ${opts.error ? `<p class="error" role="alert">${esc(opts.error)}</p>` : ""}
 // sign-up on the social site (invites.ts), so a social handle can't be taken
 async function bseSignUp(f: { username: string; name: string; password: string; password2: string; ip: string | null; country: string | null }): Promise<string> {
 	const screenName = f.username.trim().replace(/^@/, "");
-	const name = looksBlank(f.name) ? screenName : f.name.trim();
+	if (looksBlank(f.name)) throw new Refusal("Enter your name.");
+	const name = f.name.trim();
 	if (settings().signup_mode === "closed") throw new Refusal("Sign-up is closed right now.");
 	const problem = usernameProblem(screenName);
 	if (problem) throw new Refusal(problem);
@@ -1268,10 +1298,10 @@ async function accountPage(req: Request, viewer: Viewer): Promise<Response> {
 <form method="post" action="/account/unlink"><input type="hidden" name="csrf" value="${esc(viewer.csrf)}"><button type="submit" class="alt">Unlink ${esc(inst)} account</button></form>`
 			: `<p class="note">Link a ${esc(inst)} account to show its picture and checkmark here and to sign in with it. You'll sign in on ${esc(inst)} to prove it's yours.</p>
 <a class="btn" href="/auth/bs?link=1">Link a ${esc(inst)} account</a>`;
-		body = `<dl class="facts"><dt>Username</dt><dd>${esc(u.screen_name)} <span class="tag">BSE account</span></dd><dt>Name</dt><dd>${esc(u.name)}</dd><dt>Joined</dt><dd>${esc(new Date(u.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }))}</dd></dl>
+		body = `<dl class="facts"><dt>Name</dt><dd>${esc(u.name)}</dd><dt>Handle</dt><dd>@${esc(u.screen_name)} <span class="tag">BSE account</span></dd><dt>Joined</dt><dd>${esc(new Date(u.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }))}</dd></dl>
 <h2>${esc(inst)} account</h2>${linked}`;
 	} else {
-		body = `<dl class="facts"><dt>Username</dt><dd>@${esc(u.screen_name)} <span class="tag">${esc(inst)} account</span></dd><dt>Name</dt><dd>${esc(u.name)}</dd></dl>
+		body = `<dl class="facts"><dt>Name</dt><dd>${esc(u.name)}</dd><dt>Handle</dt><dd>@${esc(u.screen_name)} <span class="tag">${esc(inst)} account</span></dd></dl>
 <p class="note">You sign in to ${esc(BSE_SHORT)} with your ${esc(inst)} account. Your balance, holdings and companies stay tied to it. Change your picture, name or password on <a href="${esc(PUBLIC_ORIGIN)}/settings/account">${esc(inst)}</a>.</p>`;
 	}
 	const main = `<h1>Your account</h1>${note}${body}
