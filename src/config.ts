@@ -4,8 +4,13 @@ export const PUBLIC_ORIGIN = (process.env.PUBLIC_ORIGIN ?? `http://localhost:${P
 export const PUBLIC_HOSTNAME = new URL(PUBLIC_ORIGIN).hostname;
 
 // the Bloxburg Stock Exchange's own site: same app and accounts, its own host
-export const BSE_HOST = "trade.xitter.space";
+// BSE_HOST is the address the exchange answers on and links to; BSE_HOST=trade.xitter.space in .env
+// keeps the previous address canonical (no redirect) until the new one's DNS is live
+export const BSE_HOST_LEGACY = "trade.xitter.space";
+export const BSE_HOST = (process.env.BSE_HOST ?? "bse.jye.supply").trim().toLowerCase();
 export const BSE_HOST_OLD = "trade.bs.xitter.space";
+const BSE_HOSTS = new Set([BSE_HOST, "bse.jye.supply", BSE_HOST_LEGACY, "trade.localhost", "bse.localhost"]);
+export const isBseHostName = (h: string) => BSE_HOSTS.has(h.split(":")[0].toLowerCase());
 // first-party OAuth client (oauth.ts): public PKCE, no client secret
 export const BSE_OAUTH_CLIENT_ID = "2124290000000000800";
 export const BSE_OAUTH_NAME = "BSE — Bloxburg Stock Exchange";
@@ -13,8 +18,7 @@ export const BSE_NAME = "Bloxburg Stock Exchange";
 export const BSE_SHORT = "BSE";
 export const requestHostname = (req: Request) => (req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "").toLowerCase().split(",")[0].trim().split(":")[0];
 export const isBseHost = (req: Request) => {
-	const h = requestHostname(req);
-	return h === BSE_HOST || h === "trade.localhost" || h === "bse.localhost";
+	return isBseHostName(requestHostname(req));
 };
 export function bseOrigin(): string {
 	if (PUBLIC_HOSTNAME === "localhost" || PUBLIC_HOSTNAME === "127.0.0.1") {
@@ -34,7 +38,7 @@ export function isOwnOrigin(origin: string | null): boolean {
 	}
 	const host = u.hostname.toLowerCase();
 	if (origin === PUBLIC_ORIGIN || host === PUBLIC_HOSTNAME) return true;
-	if (host === BSE_HOST) return true;
+	if (BSE_HOSTS.has(host) && !host.endsWith(".localhost")) return true;
 	if ((host === "trade.localhost" || host === "bse.localhost") && (PUBLIC_HOSTNAME === "localhost" || PUBLIC_HOSTNAME === "127.0.0.1")) return true;
 	return false;
 }

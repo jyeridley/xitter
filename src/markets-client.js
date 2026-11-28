@@ -41,7 +41,7 @@ html[data-site=bse] .wordmark .bname{display:none}
 .bsefoot .logo-wrap .logo{height:36px}
 .bar .inapp{margin-right:8px}
 .bar .logo-wrap .logo{height:32px}
-.hnav{display:flex;align-items:center;gap:36px;margin-left:8px;flex:1}
+.hnav{display:flex;align-items:center;gap:32px;margin-left:8px;flex:1;white-space:nowrap}
 .hnav a{color:var(--ink);font-weight:500;font-size:1.05rem;padding:6px 0;border-bottom:3px solid transparent;border-radius:0;text-decoration:none}
 .hnav a:hover,.hnav a.on{border-bottom-color:var(--ink);background:transparent;color:var(--ink);text-decoration:none}
 .bsehead .grow{flex:1}
@@ -341,6 +341,86 @@ details.card summary{list-style:none;cursor:pointer;font-weight:800;font-size:17
  html[data-site=bse] .hero-stage .hero{padding:0 16px}
  .hero-stage::after{right:6%;width:110px;height:110px}
 }
+/* ---------- home page (from the bse.jye.fyi / bse.jye.supply homepage) ---------- */
+html[data-site=bse]{scroll-behavior:smooth;scroll-padding-top:110px}
+main.hm{max-width:none;padding:0;margin:0;font:400 17px/1.6 var(--sans);color:var(--txt)}
+.hm a{color:inherit;text-decoration:none}
+.hm h1,.hm h2,.hm h3{margin:0;color:var(--ink);letter-spacing:-.025em;line-height:1.08;font-family:var(--sans)}
+.hm h1{font-size:clamp(2.3rem,5vw,3.6rem);font-weight:800}
+.hm h2{font-size:clamp(1.8rem,3.4vw,2.6rem);font-weight:800;margin-bottom:16px}
+.hm h3{font-size:1.25rem;font-weight:700;margin-bottom:8px}
+.hm p{margin:0 0 14px;max-width:68ch}
+.hm .muted{color:var(--mut)}
+.hm-wrap{max-width:1240px;margin:0 auto;padding:0 32px}
+.hm-notice{background:#000;color:#fff;text-align:center;padding:26px 24px;font:700 1.5rem/1.3 var(--sans);letter-spacing:-.02em}
+.hm-notice a{color:var(--accent);text-decoration:none}
+.hm-notice a:hover{text-decoration:underline}
+.hm-delay{text-align:right;font-size:.9rem;font-style:italic;color:var(--ink);margin:14px auto 0;max-width:1240px;padding:0 32px}
+.hm-hero{position:relative;min-height:640px;display:flex;align-items:flex-end;margin-top:20px;overflow:hidden;
+ background:repeating-radial-gradient(circle at 72% 38%,rgba(255,255,255,.13) 0 2px,transparent 2px 30px),radial-gradient(circle at 72% 38%,#43b6e6 0,#1a7fb5 38%,#0a4a73 80%)}
+.hm-hero::after{content:"";position:absolute;right:16%;top:18%;width:210px;height:210px;border-radius:50%;background:radial-gradient(circle,#5fd0f2 0 28%,rgba(255,255,255,.9) 29% 31%,transparent 32%)}
+.hm-card{position:relative;z-index:1;background:#fff;border:2px solid #000;border-bottom:0;max-width:760px;padding:44px 48px 40px;margin-left:calc(max(32px,(100vw - 1240px)/2 + 32px))}
+.hm-card p{font-size:1.2rem;margin:16px 0 24px}
+.hm-cta{display:flex;gap:12px;flex-wrap:wrap}
+.hm .hm-btn{display:inline-block;font:600 1rem var(--sans);padding:14px 26px;text-decoration:none;background:#000;color:#fff;border:2px solid #000;border-radius:0}
+.hm .hm-btn:hover{background:#222;text-decoration:none}
+.hm .hm-btn.alt{background:#fff;color:#000}
+.hm .hm-btn.alt:hover{background:var(--band)}
+.hm-sec{padding:84px 0}
+.hm-sec.band{background:var(--band)}
+.hm-kicker{font-weight:700;font-size:1rem;color:var(--ink);border-bottom:3px solid var(--accent);display:inline-block;padding-bottom:4px;margin-bottom:18px}
+.hm-cols{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:32px}
+.hm-box{background:#fff;border-top:4px solid #000;padding:26px 28px 22px;box-shadow:0 1px 0 var(--line)}
+.hm-box.blue{border-top-color:var(--accent)}
+.hm-box ul{margin:0;padding-left:20px}
+.hm-box li{margin-bottom:8px}
+.hm-more{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}
+.hm table{width:100%;border-collapse:collapse}
+.hm-tbl{background:#fff;border-top:4px solid #000;overflow-x:auto;margin-top:28px}
+.hm-tbl th,.hm-tbl td{padding:15px 20px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;font-family:var(--sans);font-feature-settings:normal}
+.hm-tbl th{font-weight:600;font-size:.9rem;color:var(--mut)}
+.hm-tbl code,.hm .mono{font-family:var(--mono);font-size:.92rem}
+.hm-tbl td.r,.hm-tbl th.r{text-align:right}
+.hm-tbl td.mono{font-family:var(--mono)}
+.hm-tbl tbody tr:hover td{background:var(--band)}
+.hm-verb{display:inline-block;font:500 .75rem var(--mono);background:#000;color:#fff;padding:2px 8px;margin-right:10px}
+.hm-verb.g{background:var(--accent);color:#000}
+.hm-up{color:var(--up)}.hm-down{color:var(--dn)}
+.hm-tabs{display:flex;gap:0;margin-top:28px;border-bottom:1px solid #000}
+.hm-tab{font:600 1rem var(--sans);padding:12px 22px;border:0;border-radius:0;background:transparent;cursor:pointer;color:var(--mut);border-bottom:4px solid transparent;margin-bottom:-1px;min-height:0}
+.hm-tab[aria-selected="true"]{color:#000;border-bottom-color:var(--accent)}
+.hm pre{margin:0;background:#000;color:#e9eef1;padding:24px 28px;overflow-x:auto;font:400 .92rem/1.7 var(--mono)}
+.hm pre[hidden]{display:none}
+.hm .c{color:#8a98a0}.hm .k{color:var(--accent)}.hm .s{color:#9be3b8}
+.hm-steps{list-style:none;margin:32px 0 0;padding:0;display:grid;grid-template-columns:repeat(4,1fr);gap:24px;counter-reset:s}
+.hm-steps li{counter-increment:s;border-top:4px solid #000;padding-top:14px}
+.hm-steps li::before{content:counter(s);font:800 2rem var(--sans);color:var(--ink);display:block;margin-bottom:4px}
+.hm-steps p{font-size:.97rem;color:var(--mut)}
+.hm-three{display:grid;grid-template-columns:repeat(3,1fr);gap:32px;margin-top:32px}
+.hm-three .hm-box p{color:var(--mut);margin:0;font-size:.98rem}
+.hm-road{list-style:none;margin:32px 0 0;padding:0;border-top:1px solid #000}
+.hm-road li{display:grid;grid-template-columns:240px 1fr;gap:24px;padding:22px 0;border-bottom:1px solid var(--line)}
+.hm-road b{font-size:1.15rem;color:var(--ink)}
+.hm-road span{color:var(--mut)}
+.hm details{border-bottom:1px solid var(--line);padding:18px 0;background:transparent;border-radius:0}
+.hm summary{cursor:pointer;font-weight:600;font-size:1.1rem;color:var(--ink)}
+.hm details p{margin:10px 0 0;color:var(--mut)}
+.hm-join{background:#000;color:#fff;padding:64px 0}
+.hm-join h2{color:#fff}
+.hm-join p{opacity:.85}
+.hm-join .hm-btn{background:var(--accent);border-color:var(--accent);color:#000}
+.hm-join .hm-btn:hover{background:#9ad8f2}
+.hm-join .hm-btn.alt{background:transparent;color:#fff;border-color:#fff}
+.hm-join .hm-btn.alt:hover{background:#222}
+@media(max-width:900px){.hm-steps{grid-template-columns:1fr 1fr}}
+@media(max-width:860px){.hm-three{grid-template-columns:1fr}}
+@media(max-width:800px){.hm-hero{min-height:520px}.hm-hero::after{right:8%;width:130px;height:130px}.hm-card{margin-left:0;padding:28px 22px;max-width:none;border-left:0;border-right:0}.hm-cols{grid-template-columns:1fr}.hm-sec{padding:56px 0}}
+@media(max-width:700px){.hm-road li{grid-template-columns:1fr;gap:4px}.hm-wrap,.hm-delay{padding:0 20px}}
+@media(max-width:640px){.hm-notice{font-size:1.15rem;padding:18px}}
+@media(max-width:520px){.hm-steps{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){html[data-site=bse]{scroll-behavior:auto}}
+.hm+.bsefoot{margin-top:0}
+.bsefoot .fine{display:flex;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;margin-top:18px;padding-top:16px;border-top:1px solid var(--line);font-size:.88rem}
 /*---SCRIPT---*/
 (function(){
 var B=window.TRADEX,CSRF=B.csrf,COIN=B.coin,SITE=B.site||'app',HOME=B.home||'',BSE_NAME=B.name||'Bloxburg Stock Exchange',BSE_SHORT=B.short||'BSE';
@@ -370,7 +450,8 @@ function bootRoute(){
   if(path==='/new'||path==='/list-company')return {page:'new'};
   var m=path.match(/^\/c\/([A-Za-z]{2,5})(?:\/(edit))?$/i);
   if(m)return {page:m[2]?'edit':'co',ticker:m[1]};
-  return {page:Q.get('c')?'co':'dash',ticker:Q.get('c')};
+  if(path==='/overview')return {page:'dash'};
+  return {page:Q.get('c')?'co':'home',ticker:Q.get('c')};
  }
  return {page:Q.get('c')&&Q.get('p')!=='edit'?'co':(PAGES.indexOf(Q.get('p'))>=0?Q.get('p'):'dash'),ticker:Q.get('c')};
 }
@@ -392,7 +473,8 @@ function api(path,body){
 }
 function pathOf(p,x){
  if(SITE==='bse'){
-  if(p==='dash')return '/';
+  if(p==='home')return '/';
+  if(p==='dash')return '/overview';
   if(p==='list')return '/markets';
   if(p==='acct')return '/portfolio';
   if(p==='admin')return '/admin';
@@ -526,21 +608,97 @@ function showSuggest(q){
 function siteFoot(){
  var note=checkNote();
  if(SITE!=='bse')return note;
- var links='<a href="/" data-go="dash">Overview</a><a href="/markets" data-go="list">Markets</a>'
+ var links='<a href="/" data-go="home">Home</a><a href="/markets" data-go="list">Listings</a><a href="/overview" data-go="dash">Market Data</a>'
   +(db.me?'<a href="/portfolio" data-go="acct">Portfolio</a>':'<a href="'+esc(signInHref())+'">Sign in</a>')
   +(db.me&&db.me.canList?'<a href="/new" data-go="new">List a company</a>':'')
   +(HOME?'<a href="'+esc(HOME)+'">'+esc(db.instance||'Bloxburg Social')+'</a>':'');
- return '<footer class=bsefoot><a class="wordmark brand" href="/" data-go="dash" aria-label="'+esc(BSE_SHORT)+'">'+logoImgs()+'</a><div class=flinks>'+links+'</div>'+note+'</footer>';
+ return '<footer class=bsefoot><a class="wordmark brand" href="/" data-go="home" aria-label="'+esc(BSE_SHORT)+'">'+logoImgs()+'</a><div class=flinks>'+links+'</div>'+note+'<div class=fine><span>© 2026 Bloxburg Stock Exchange · BloxburgStockExchange.Org</span><span>Independent community project. Not affiliated with Roblox, Welcome to Bloxburg or the NYSE.</span></div></footer>';
 }
 function dockNav(){
  if(SITE!=='bse')return '';
- var ico={dash:'<svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"/></svg>',list:'<svg viewBox="0 0 24 24"><path d="M5 5h14v2H5zm0 6h14v2H5zm0 6h14v2H5z"/></svg>',acct:'<svg viewBox="0 0 24 24"><path d="M12 3a5 5 0 110 10 5 5 0 010-10zm0 12c4.4 0 8 2.2 8 5v2H4v-2c0-2.8 3.6-5 8-5z"/></svg>'};
- var items=[['dash','Overview',ico.dash],['list','Markets',ico.list]].concat(db.me?[['acct','Portfolio',ico.acct]]:[['signin','Sign in',ico.acct]]);
+ var ico={dash:'<svg viewBox="0 0 24 24"><path d="M4 19h16v2H4zM5 11h3v7H5zm5-6h3v13h-3zm5 4h3v9h-3z"/></svg>',home:'<svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"/></svg>',list:'<svg viewBox="0 0 24 24"><path d="M5 5h14v2H5zm0 6h14v2H5zm0 6h14v2H5z"/></svg>',acct:'<svg viewBox="0 0 24 24"><path d="M12 3a5 5 0 110 10 5 5 0 010-10zm0 12c4.4 0 8 2.2 8 5v2H4v-2c0-2.8 3.6-5 8-5z"/></svg>'};
+ var items=[['home','Home',ico.home],['list','Markets',ico.list],['dash','Data',ico.dash]].concat(db.me?[['acct','Portfolio',ico.acct]]:[['signin','Sign in',ico.acct]]);
  return '<nav class=dock aria-label="Primary">'+items.map(function(t){
   if(t[0]==='signin') return '<a href="'+esc(signInHref())+'">'+t[2]+t[1]+'</a>';
   return '<a href="'+pathOf(t[0])+'" data-go="'+t[0]+'" class="'+(S.page===t[0]||(t[0]==='list'&&S.page==='co')?'on':'')+'">'+t[2]+t[1]+'</a>';
  }).join('')+'</nav>';
 }
+
+/* ---------- HOME (the exchange's front page, ported from the BSE homepage) ---------- */
+function homeNotice(){
+ return '<div class=hm-notice id=top>The BSE API proposal is open for community feedback. <a href="#join">Read now</a></div>';
+}
+function homeRows(){
+ var rows=db.companies.filter(function(c){return !c.suspended}).slice().sort(function(a,b){return b.price*b.shares-a.price*a.shares}).slice(0,12);
+ if(!rows.length)return '<tr><td colspan=4 class=muted>No companies are listed yet.</td></tr>';
+ return rows.map(function(c){var x=chg(c);
+  return '<tr><td><a href="'+pathOf('co',c.id)+'" data-go="co" data-id="'+c.id+'"><b>'+esc(c.ticker)+'</b></a></td><td>'+esc(c.name)+'</td><td class="r mono">'+fp(c.price)+'</td><td class="r mono '+(x>=0?'hm-up':'hm-down')+'">'+(x>=0?'+':'')+x.toFixed(2)+'%</td></tr>';
+ }).join('');
+}
+function homeNote(){return SITE==='bse'&&db.companies.length?'<p class=hm-delay>Live prices in Money, updated every few seconds.</p>':''}
+function home(){
+ var me=db.me;
+ return '<main class=hm>'
+ +'<div class=hm-hero><div class=hm-card><h1>The home of Bloxburg’s political economy</h1>'
+ +'<p>One open stock and trading API for every website, Discord bot and app. One set of prices, one set of rules, one economy for all of Bloxburg Politics.</p>'
+ +'<div class=hm-cta><a class=hm-btn href="/markets" data-go="list">Start trading</a><a class="hm-btn alt" href="#listings">Read the proposal</a></div></div></div>'
+ +'<section class=hm-sec id=listings><div class=hm-wrap><span class=hm-kicker>Listings</span><h2>The problem and the proposal</h2>'
+ +'<p class=muted>Each server or group tracks its own stocks, balances and trades today. That duplicates work, produces prices that disagree and stops players trading across communities.</p>'
+ +'<div class=hm-cols><div class=hm-box><h3>Today</h3><ul><li>Every community keeps its own ledger, often in a spreadsheet.</li><li>The same company can have a different price in each server.</li><li>Bot developers rebuild market logic from scratch.</li><li>Holdings cannot move between communities.</li></ul></div>'
+ +'<div class="hm-box blue"><h3>With a shared API</h3><ul><li>One public source of truth for prices, listings and trades.</li><li>Any site or bot reads it with a single HTTP request.</li><li>Developers add a market in minutes, not weeks.</li><li>Portfolios follow players wherever they play.</li></ul></div></div>'
+ +'<div class=hm-more><a class=hm-btn href="/markets" data-go="list">Browse listings</a><a class="hm-btn alt" href="/new" data-go="new">List a company</a></div>'
+ +'</div></section>'
+ +'<section class="hm-sec band" id=trading><div class=hm-wrap><span class=hm-kicker>Trading</span><h2>What the API would provide</h2>'
+ +'<p class=muted>A small REST interface returning JSON. Reading is open. Trading needs an API key tied to a verified player account. The base URL is proposed and may change.</p>'
+ +'<div class=hm-tbl><table><thead><tr><th>Endpoint</th><th>What it returns</th></tr></thead><tbody>'
+ +'<tr><td><span class="hm-verb g">GET</span><code>/v1/stocks</code></td><td>Every listed stock with its latest price and daily change.</td></tr>'
+ +'<tr><td><span class="hm-verb g">GET</span><code>/v1/stocks/{symbol}</code></td><td>One stock’s details, issuer, volume and price history.</td></tr>'
+ +'<tr><td><span class="hm-verb g">GET</span><code>/v1/players/{id}/portfolio</code></td><td>A player’s holdings and cash balance.</td></tr>'
+ +'<tr><td><span class=hm-verb>POST</span><code>/v1/orders</code></td><td>Places a buy or sell order. Requires an API key.</td></tr>'
+ +'<tr><td><span class="hm-verb g">GET</span><code>/v1/leaderboard</code></td><td>Top traders and biggest movers for a chosen period.</td></tr>'
+ +'<tr><td><span class=hm-verb>POST</span><code>/v1/webhooks</code></td><td>Sends price alerts and trade events to a Discord channel or URL.</td></tr>'
+ +'</tbody></table></div>'
+ +'<h3 style="margin-top:56px">Build with it</h3>'
+ +'<div class=hm-tabs role=tablist aria-label="Code examples"><button class=hm-tab role=tab aria-selected=true aria-controls=p1 id=t1>Website</button><button class=hm-tab role=tab aria-selected=false aria-controls=p2 id=t2>Discord bot</button><button class=hm-tab role=tab aria-selected=false aria-controls=p3 id=t3>curl</button></div>'
+ +HOME_CODE
+ +'<h3 style="margin-top:56px">How a trade flows</h3>'
+ +'<ol class=hm-steps><li><h3>Request</h3><p>A site or bot sends an order with its API key.</p></li><li><h3>Validate</h3><p>The exchange checks the balance, the symbol and rate limits.</p></li><li><h3>Match</h3><p>The order fills at the current market price and is recorded.</p></li><li><h3>Broadcast</h3><p>Webhooks notify subscribed channels and every client sees the new price.</p></li></ol>'
+ +'<div class=hm-more><a class=hm-btn href="'+(me?'/portfolio':esc(signInHref()))+'"'+(me?' data-go=acct':'')+'>'+(me?'Open your portfolio':'Sign in to trade')+'</a></div>'
+ +'</div></section>'
+ +'<section class=hm-sec id=market-data><div class=hm-wrap><span class=hm-kicker>Market Data</span><h2>One feed, every community</h2>'
+ +'<p class=muted>This is the live board from the exchange, the kind any site or bot could display from the same data.</p>'
+ +'<div class=hm-tbl><table><thead><tr><th>Symbol</th><th>Company</th><th class=r>Price</th><th class=r>Change</th></tr></thead><tbody id=hm-rows>'+homeRows()+'</tbody></table></div>'
+ +'<div class=hm-more><a class="hm-btn alt" href="/overview" data-go="dash">Market overview</a><a class="hm-btn alt" href="/markets" data-go="list">All markets</a></div>'
+ +'</div></section>'
+ +'<section class="hm-sec band" id=insights><div class=hm-wrap><span class=hm-kicker>Insights</span><h2>Principles and roadmap</h2>'
+ +'<div class=hm-three><div class=hm-box><h3>Open by default</h3><p>Market data is free to read, with clear rate limits, so small projects can use it too.</p></div><div class=hm-box><h3>Fair and auditable</h3><p>Every trade is logged and viewable, so players can verify prices and history.</p></div><div class=hm-box><h3>Community governed</h3><p>Listing rules and changes are decided in public with representatives from participating communities.</p></div></div>'
+ +'<ol class=hm-road><li><b>Phase 1: Proposal</b><span>Publish this page and gather input from community leaders, bot developers and players.</span></li><li><b>Phase 2: Read-only prototype</b><span>Launch listings, prices and history endpoints with sample companies.</span></li><li><b>Phase 3: Trading and accounts</b><span>Add player accounts, API keys, portfolios and order placement.</span></li><li><b>Phase 4: Integrations</b><span>Release a Discord bot template, a JavaScript SDK and webhook alerts.</span></li><li><b>Phase 5: Public launch</b><span>Open listings to participating communities with published governance rules.</span></li></ol>'
+ +'</div></section>'
+ +'<section class=hm-sec id=about><div class=hm-wrap><span class=hm-kicker>About</span><h2>Questions people ask</h2><div style="max-width:820px;margin-top:20px">'
+ +'<details><summary>Is this live yet?</summary><p>The exchange is open: listings, live prices and trading with Money work on this site today. The shared API described above is still an open proposal.</p></details>'
+ +'<details><summary>Does it cost anything?</summary><p>The proposal is for free read access and free keys for community projects. Any change would be announced and discussed first.</p></details>'
+ +'<details><summary>Who decides which stocks are listed?</summary><p>Listing criteria would be written publicly, with a review process involving participating communities rather than a single owner.</p></details>'
+ +'<details><summary>Is the currency real money?</summary><p>No. Everything is in-game Bloxburg economy value (Money) for roleplay. No real money is involved.</p></details>'
+ +'<details><summary>Is this affiliated with Bloxburg, Roblox or the NYSE?</summary><p>No. BSE is an independent community project and is not endorsed by Welcome to Bloxburg, Roblox or any real-world exchange.</p></details>'
+ +'</div></div></section>'
+ +'<div class=hm-join id=join><div class=hm-wrap><h2>Help shape the exchange</h2><p>Run a community, build bots, or want fair markets? Tell us what you would need from a shared API.</p>'
+ +'<div class=hm-cta style="margin-top:22px"><a class=hm-btn href="https://forms.gle/cokNPuWxqYrVGzSB7" target=_blank rel="noopener noreferrer">Send feedback</a><a class="hm-btn alt" href="#listings">Review the proposal</a></div></div></div>'
+ +'</main>';
+}
+var HOME_CODE='<pre id=p1 role=tabpanel aria-labelledby=t1><span class=c>// Show a live price on any web page</span>\n<span class=k>const</span> res = <span class=k>await</span> fetch(<span class=s>"https://api.bse.jyeridley.dev/v1/stocks/BCF"</span>);\n<span class=k>const</span> stock = <span class=k>await</span> res.json();\ndocument.querySelector(<span class=s>"#price"</span>).textContent = <span class=s>`B$${stock.price}`</span>;</pre>'
+ +'<pre id=p2 role=tabpanel aria-labelledby=t2 hidden><span class=c>// discord.js slash command: /price BCF</span>\n<span class=k>const</span> res = <span class=k>await</span> fetch(<span class=s>`https://api.bse.jyeridley.dev/v1/stocks/${symbol}`</span>);\n<span class=k>const</span> { name, price, change_pct } = <span class=k>await</span> res.json();\n<span class=k>await</span> interaction.reply(<span class=s>`${name}: B$${price} (${change_pct}%)`</span>);</pre>'
+ +'<pre id=p3 role=tabpanel aria-labelledby=t3 hidden><span class=c># Place a buy order (API key required)</span>\ncurl -X POST https://api.bse.jyeridley.dev/v1/orders \\\n  -H <span class=s>"Authorization: Bearer YOUR_KEY"</span> \\\n  -H <span class=s>"Content-Type: application/json"</span> \\\n  -d <span class=s>\'{"symbol":"BCF","side":"buy","quantity":10}\'</span></pre>';
+function homeWire(){
+ document.querySelectorAll('.hm-tab').forEach(function(t){t.addEventListener('click',function(){
+  document.querySelectorAll('.hm-tab').forEach(function(o){var on=o===t;o.setAttribute('aria-selected',on);var p=document.getElementById(o.getAttribute('aria-controls'));if(p)p.hidden=!on});
+ })});
+}
+function homeSpy(){
+ if(S.page!=='home')return;
+ var cur=null;['insights','about'].forEach(function(id){var el=document.getElementById(id);if(el&&el.getBoundingClientRect().top<160)cur=id});
+ document.querySelectorAll('.hnav a[data-sec]').forEach(function(a){a.classList.toggle('on',a.getAttribute('data-sec')===cur)});
+}
+addEventListener('scroll',homeSpy,{passive:true});
 
 /* ---------- PAGES ---------- */
 function dash(){
@@ -741,14 +899,21 @@ var ADMIN={
 /* ---------- ROUTER ---------- */
 var BACK='<svg viewBox="0 0 24 24"><path d="M7.414 13l5.043 5.04-1.414 1.42L3.586 12l7.457-7.46 1.414 1.42L7.414 11H21v2H7.414z"/></svg>';
 function tabs(){return [['dash','Overview'],['list','Markets']].concat(db.me?[['acct','Portfolio']]:[]).concat(db.admin?[['admin','Admin']]:[])}
+function bseNav(){
+ var P=S.page,L=[['list','Listings',P==='list'||P==='co'||P==='new'||P==='edit'],['acct','Trading',P==='acct'],['dash','Market Data',P==='dash']];
+ var h=L.map(function(t){return '<a href="'+pathOf(t[0])+'" data-go="'+t[0]+'" class="'+(t[2]?'on':'')+'">'+t[1]+'</a>'}).join('');
+ h+='<a href="/#insights" data-sec=insights>Insights</a><a href="/#about" data-sec=about>About</a>';
+ if(db.admin)h+='<a href="/admin" data-go=admin class="'+(P==='admin'?'on':'')+'">Admin</a>';
+ return h;
+}
 function siteHead(){
  if(SITE!=='bse')return '';
  var me=db.me;
- var nav=tabs().map(function(t){return '<a href="'+pathOf(t[0])+'" data-go="'+t[0]+'" class="'+(S.page===t[0]||(t[0]==='list'&&S.page==='co')?'on':'')+'">'+t[1]+'</a>'}).join('');
+ var nav=bseNav();
  var account=me
   ? '<a class=bal href="/portfolio" data-go="acct" title="Money balance">'+coin+'<span class=num>'+fmt(me.cash)+'</span></a><details class=acct><summary>'+(me.avatar?'<img src="'+esc(me.avatar)+'" alt="">':'')+'<span>@'+esc(me.handle)+'</span></summary><div class=acctm><a href="/portfolio" data-go="acct">Portfolio</a><div class=lbl>'+fmt(me.cash)+' Money available</div><a href="/logout">Log out</a></div></details>'
   : '<a class="small primary" href="'+esc(signInHref())+'">Sign in</a>';
- return '<header class=bsehead><a class=wordmark href="/" data-go="dash" aria-label="'+esc(BSE_SHORT)+'">'+logoImgs()+'<span class=bname>'+esc(BSE_NAME)+'</span></a><nav class=hnav aria-label="Primary">'+nav+'</nav><div class=grow></div>'
+ return '<header class=bsehead><a class=wordmark href="/" data-go="home" aria-label="'+esc(BSE_SHORT)+'">'+logoImgs()+'<span class=bname>'+esc(BSE_NAME)+'</span></a><nav class=hnav aria-label="Primary">'+nav+'</nav><div class=grow></div>'
   +'<div class=hsearch>'+SEARCH_ICO+'<input id=qtop type=search placeholder="Search tickers" value="'+esc(S.qtop||'')+'" autocomplete=off aria-label="Search tickers"><div id=qsug role="listbox" aria-label="Matching companies"></div></div>'
   +account
   +(HOME?'<a class=glink href="'+esc(HOME)+'">'+esc(db.instance||'Bloxburg Social')+'</a>':'')+'</header>';
@@ -759,19 +924,20 @@ function render(){
  var title=S.page==='co'&&co?co.ticker:S.page==='new'?'List a company':S.page==='edit'&&co?'Edit '+co.ticker:BSE_SHORT;
  var sub=S.page==='co'&&co?esc(co.name):db.me&&db.me.cash!=null?coin+fmt(db.me.cash)+' in Money':BSE_NAME;
  var back=S.page==='co'||S.page==='new'||S.page==='edit'||(!framed&&SITE!=='bse');
- var hideBar=SITE==='bse'&&(S.page==='dash'||S.page==='list'||S.page==='acct'||S.page==='admin');
+ var hideBar=SITE==='bse'&&(S.page==='home'||S.page==='dash'||S.page==='list'||S.page==='acct'||S.page==='admin');
  var inLogo=SITE!=='bse'?'<a class="wordmark inapp" href="'+pathOf('dash')+'" data-go="dash" aria-label="'+esc(BSE_SHORT)+'">'+logoImgs()+'</a>':'';
  var heading=title===BSE_SHORT?'':'<h1>'+esc(title)+'</h1>';
  var bar=hideBar?'':'<div class=bar>'+(back?'<button class=iconbtn data-back aria-label="Back">'+BACK+'</button>':'')+inLogo+'<div class=grow>'+heading+'<div class=sub>'+sub+'</div></div>'+(db.me&&db.me.canList&&S.page!=='new'&&S.page!=='edit'?'<button class="small primary" data-go="new" style="flex:0 0 auto">List a company</button>':'')+'</div>';
  var nav=hideBar||S.page==='new'||S.page==='edit'||SITE==='bse'?'':'<nav class=tabs>'+tabs().map(function(t){return '<a href="'+pathOf(t[0])+'" data-go="'+t[0]+'" class="'+(S.page===t[0]||(t[0]==='list'&&S.page==='co')?'on':'')+'">'+t[1]+'</a>'}).join('')+'</nav>';
- var body={dash:dash,list:list,co:coPage,acct:acct,admin:adminPage,new:function(){return companyForm(null)},edit:function(){return co?companyForm(co):coPage()}}[S.page]();
+ var body={home:home,dash:dash,list:list,co:coPage,acct:acct,admin:adminPage,new:function(){return companyForm(null)},edit:function(){return co?companyForm(co):coPage()}}[S.page]();
  var y=window.scrollY,old=$('.bar'),hid=!!(old&&old.hidden),f=document.activeElement&&document.activeElement.id,sel=f&&document.activeElement.selectionStart;
- $('#app').innerHTML=siteHead()+tape()+bar+nav+body+siteFoot()+dockNav();
+ $('#app').innerHTML=siteHead()+(S.page==='home'?homeNotice():'')+tape()+(S.page==='home'?homeNote():'')+bar+nav+body+siteFoot()+dockNav();
+ if(S.page==='home'){homeWire();homeSpy()}
  if(hid&&$('.bar'))$('.bar').hidden=true;
  if(f&&$('#'+f)){var el=$('#'+f);el.focus();try{if(sel!=null)el.setSelectionRange(sel,sel)}catch(e){}}
  window.scrollTo(0,y);
  updTicket();formPreview();
- document.title=S.page==='co'&&co?co.ticker+' · '+co.name+' · '+BSE_SHORT:(SITE==='bse'?BSE_NAME:BSE_SHORT+' · '+db.instance);
+ document.title=S.page==='co'&&co?co.ticker+' · '+co.name+' · '+BSE_SHORT:(SITE==='bse'?(S.page==='home'?BSE_SHORT+' | '+BSE_NAME:BSE_NAME):BSE_SHORT+' · '+db.instance);
 }
 
 document.addEventListener('click',function(e){
@@ -820,6 +986,7 @@ setInterval(function(){
  api('state').then(function(st){
   db=st;busy=false;
   if(S.page==='dash'||S.page==='acct')render();
+  else if(S.page==='home'){var hr=$('#hm-rows');if(hr)hr.innerHTML=homeRows();refreshTape()}
   else if(S.page==='list'){var r=$('#rows');if(r)r.innerHTML=rowsOf(filteredCompanies());else render();refreshTape()}
   else if(S.page==='co'){updateLive();refreshTape()}
  },function(){busy=false});

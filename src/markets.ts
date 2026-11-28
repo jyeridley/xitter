@@ -1,4 +1,4 @@
-// BSE, the Bloxburg Stock Exchange, at /i/markets and trade.xitter.space: staff (the admin role) and
+// BSE, the Bloxburg Stock Exchange, at /i/markets and bse.jye.supply: staff (the admin role) and
 // any account can list companies (checkmarked ones show as verified), prices drift a little
 // every two seconds, and every signed-in account trades with its money
 // (money.ts: the wallet's balance is the cash; a buy takes from it and a sale
@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Viewer } from "./auth";
 import { getViewer, startSession, sessionCookies, clearedCookies, SECURE, sessionKey } from "./auth";
-import { BSE_HOST, BSE_NAME, BSE_SHORT, PUBLIC_ORIGIN, bseOrigin, isBseHost, isOwnOrigin, requestOrigin } from "./config";
+import { BSE_NAME, BSE_SHORT, PUBLIC_ORIGIN, bseOrigin, isBseHost, isBseHostName, isOwnOrigin, requestOrigin } from "./config";
 import { recordSignIn } from "./login-history";
 import { passwordStep } from "./password-sign-in";
 import { loadLook, nightModeCookies } from "./themes/api";
@@ -588,6 +588,7 @@ function describeCompany(c: Company) {
 	return `${c.name} (${c.ticker}) ${fmtP(c.price)} ${sg(pct(c.price, c.prevClose))} · market cap ${big(c.price * c.shares)} · volume ${c.volume.toLocaleString("en-US")}${c.sector ? ` · ${c.sector}` : ""}${c.owner ? ` · founded by @${c.owner.handle}` : ""}${c.suspended ? " · SUSPENDED" : ""}`;
 }
 
+const HOME_DESC = "One open stock and trading API that websites, Discord bots and apps can all use, so every Bloxburg Politics community shares one economy. Live prices and trading with Money.";
 async function page(req: Request, viewer: Viewer | undefined, opts: { standalone?: boolean; ticker?: string | null; view?: string | null } = {}): Promise<Response> {
 	const url = new URL(req.url);
 	const st = await state(viewer);
@@ -596,14 +597,16 @@ async function page(req: Request, viewer: Viewer | undefined, opts: { standalone
 	const co = companyBy(st, ticker);
 	const inst = settings().instance_name;
 	const title = co ? `${co.ticker} · ${co.name}` : standalone ? BSE_NAME : "BSE";
-	const desc = co ? describeCompany(co) : describeMarket(st);
+	const home = standalone && !co && (!opts.view || opts.view === "home");
+	const desc = co ? describeCompany(co) : home ? HOME_DESC : describeMarket(st);
 	const v = Math.floor(Date.now() / 60000).toString(36);
 	const origin = standalone ? (isBseHost(req) ? requestOrigin(req) : bseOrigin()) : PUBLIC_ORIGIN;
-	const path = standalone ? (co ? `/c/${co.ticker}` : "/") : `${MARKETS_PATH}${co ? `?c=${encodeURIComponent(co.ticker)}` : ""}`;
+	const VIEW_PATH: Record<string, string> = { dash: "/overview", list: "/markets", acct: "/portfolio", admin: "/admin", new: "/new" };
+	const path = standalone ? (co ? `/c/${co.ticker}` : (opts.view && VIEW_PATH[opts.view]) || "/") : `${MARKETS_PATH}${co ? `?c=${encodeURIComponent(co.ticker)}` : ""}`;
 	const image = `${origin}${MARKETS_PATH}/og.png?${co ? `c=${encodeURIComponent(co.ticker)}&` : ""}v=${v}`;
 	const canonical = `${origin}${path}`;
 	const siteName = standalone ? BSE_NAME : inst;
-	const ogTitle = co ? `${BSE_SHORT} · ${co.ticker} · ${co.name}` : BSE_NAME;
+	const ogTitle = co ? `${BSE_SHORT} · ${co.ticker} · ${co.name}` : home ? `${BSE_SHORT} | ${BSE_NAME}` : BSE_NAME;
 	const head = [
 		["property", "og:title", ogTitle],
 		["property", "og:description", desc],
@@ -631,7 +634,7 @@ async function page(req: Request, viewer: Viewer | undefined, opts: { standalone
 		name: BSE_NAME,
 		short: BSE_SHORT,
 	}).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
-	const docTitle = co ? `${co.ticker} · ${co.name} · ${BSE_SHORT}` : standalone ? BSE_NAME : `${BSE_SHORT} · ${inst}`;
+	const docTitle = co ? `${co.ticker} · ${co.name} · ${BSE_SHORT}` : home ? `${BSE_SHORT} | ${BSE_NAME}` : standalone ? BSE_NAME : `${BSE_SHORT} · ${inst}`;
 	const html = `<!DOCTYPE html>
 <html lang="en" data-theme="light"${standalone ? ' data-site="bse"' : ""}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${esc(docTitle)}</title>
@@ -738,7 +741,7 @@ const pictures = new Map<string, Promise<Buffer>>();
 function ogFoot(ticker: string | null, origin: string): string {
 	try {
 		const host = new URL(origin).host;
-		if (host === BSE_HOST || host.startsWith("trade.") || host.startsWith("bse.")) return ticker ? `${host}/c/${ticker}` : host;
+		if (isBseHostName(host) || host.startsWith("trade.") || host.startsWith("bse.")) return ticker ? `${host}/c/${ticker}` : host;
 		return `${host}${MARKETS_PATH}${ticker ? `?c=${ticker}` : ""}`;
 	} catch {
 		return OWN_HOST;
@@ -881,14 +884,13 @@ function bseTickerPath(pathname: string): string | null {
 	return m ? m[1].toUpperCase() : null;
 }
 function isBsePublicHost(host: string): boolean {
-	const h = host.split(":")[0].toLowerCase();
-	return h === BSE_HOST || h === "trade.localhost" || h === "bse.localhost";
+	return isBseHostName(host);
 }
 export function isMarketLink(url: string): boolean {
 	try {
 		const u = new URL(url);
 		if (u.host === OWN_HOST && (u.pathname === MARKETS_PATH || u.pathname === `${MARKETS_PATH}/`)) return true;
-		if (isBsePublicHost(u.host) && (u.pathname === "/" || u.pathname === "" || bseTickerPath(u.pathname) || u.pathname === "/markets")) return true;
+		if (isBsePublicHost(u.host) && (u.pathname === "/" || u.pathname === "" || u.pathname === "/overview" || bseTickerPath(u.pathname) || u.pathname === "/markets")) return true;
 		return false;
 	} catch {
 		return false;
@@ -927,7 +929,7 @@ export async function marketLinkCard(url: string): Promise<Record<string, unknow
 // ---------- routes ----------
 
 
-// ---------- the BSE's own site (trade.xitter.space) ----------
+// ---------- the BSE's own site (bse.jye.supply) ----------
 
 const optsIp = (req: Request) => req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
 // a relative path on the BSE site, or "/" when the value isn't one of ours
@@ -1013,6 +1015,9 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid var(-
 .logo-wrap .logo-on-dark{display:none}
 .logo-wrap .logo-on-light{display:block}
 .wordmark .bname{display:none}
+.hnav{display:flex;align-items:center;gap:32px;margin-left:8px;white-space:nowrap}
+.hnav a{color:var(--ink);font-weight:500;font-size:1.05rem;padding:6px 0;border-bottom:3px solid transparent;text-decoration:none}
+.hnav a:hover{border-bottom-color:var(--ink);text-decoration:none}
 .bsehead .grow{flex:1}
 .bsehead .glink{color:var(--mut);font-size:13px;font-weight:500;white-space:nowrap}
 .tape{padding:24px 32px 8px;background:#fff;overflow:hidden}
@@ -1047,6 +1052,7 @@ button:hover{background:#222}
 .back{margin:12px 0 0;text-align:center;font-size:13px}
 .fine{margin:28px 0 0;text-align:center;color:var(--mut);font-size:12px}
 .fine a{color:inherit;text-decoration:underline}
+@media(max-width:800px){.hnav{display:none}}
 @media(max-width:700px){.tick-mkt{width:88px;padding:0 12px}.tape{padding:18px 16px 6px}.bsehead{padding:0 16px;height:64px}.logo-wrap .logo{height:36px}.wrap{padding:28px 12px 40px}.card{padding:28px 20px 22px}}`;
 
 async function loginPage(req: Request, opts: { next: string; error?: string; status?: number; challenge?: string; typed?: string; csrf?: string }): Promise<Response> {
@@ -1069,7 +1075,7 @@ ${BSE_ICONS}
 <meta name="description" content="Sign in to ${esc(BSE_NAME)} with your ${esc(inst)} account.">
 <style>${LOGIN_CSS}</style></head>
 <body>
-<header class="bsehead"><a class="wordmark" href="/" aria-label="${esc(BSE_SHORT)}">${BSE_WORDMARK}<span class="bname">${esc(BSE_NAME)}</span></a><div class="grow"></div><a class="glink" href="${esc(PUBLIC_ORIGIN)}">${esc(inst)}</a></header>
+<header class="bsehead"><a class="wordmark" href="/" aria-label="${esc(BSE_SHORT)}">${BSE_WORDMARK}<span class="bname">${esc(BSE_NAME)}</span></a><nav class="hnav" aria-label="Primary"><a href="/markets">Listings</a><a href="/portfolio">Trading</a><a href="/overview">Market Data</a><a href="/#insights">Insights</a><a href="/#about">About</a></nav><div class="grow"></div><a class="glink" href="${esc(PUBLIC_ORIGIN)}">${esc(inst)}</a></header>
 ${tape}
 <div class="wrap"><main class="card">
 <h1>${twoFactor ? "Enter your verification code" : `Sign in to ${esc(BSE_SHORT)}`}</h1>
@@ -1083,7 +1089,7 @@ ${fields}
 </form>
 ${twoFactor ? `<p class="back"><a href="/login?next=${encodeURIComponent(next)}">Back to sign in</a></p>` : `<p class="links"><a href="${esc(PUBLIC_ORIGIN)}/account/forgot">Forgot password</a><a href="${esc(PUBLIC_ORIGIN)}/i/flow/signup">Create a ${esc(inst)} account</a></p>`}
 </main></div>
-<p class="fine">${esc(inst)} account · <a href="/">${esc(BSE_NAME)}</a></p>
+<p class="fine">${esc(inst)} account · <a href="/">${esc(BSE_NAME)}</a> · © 2026 Bloxburg Stock Exchange. Independent community project. Not affiliated with Roblox, Welcome to Bloxburg or the NYSE.</p>
 </body></html>`;
 	const headers = new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
 	headers.append("set-cookie", loginCsrfCookie(csrf));
@@ -1173,7 +1179,8 @@ function bseLogout(next = "/"): Response {
 }
 
 function mapBsePage(pathname: string, q: URLSearchParams): { view?: string; ticker?: string | null } | null {
-	if (pathname === "/" || pathname === "") return { ticker: q.get("c") };
+	if (pathname === "/" || pathname === "") return q.get("c") ? { ticker: q.get("c") } : { view: "home" };
+	if (pathname === "/overview") return { view: "dash" };
 	if (pathname === "/markets" || pathname === "/list") return { view: "list" };
 	if (pathname === "/portfolio") return { view: "acct" };
 	if (pathname === "/admin") return { view: "admin" };

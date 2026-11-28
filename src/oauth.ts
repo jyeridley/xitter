@@ -218,6 +218,7 @@ async function issueAuthorizationCode(request: RequestData, viewer: Viewer): Pro
 // the BSE site's public PKCE client: no secret, the production redirect and local loopback
 export async function ensureBseOAuthClient() {
 	const redirects = [
+		`https://bse.jye.supply/auth/callback`,
 		`https://trade.xitter.space/auth/callback`,
 		`http://trade.localhost:3000/auth/callback`,
 		`http://trade.localhost:3001/auth/callback`,
