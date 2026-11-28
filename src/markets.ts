@@ -969,22 +969,26 @@ function validLoginPost(req: Request, csrf: string): boolean {
 	return isOwnOrigin(req.headers.get("origin")) && req.headers.get("origin") === requestOrigin(req) && sameCsrf(parseCookie(req, LOGIN_CSRF_COOKIE) ?? "", csrf);
 }
 
-const LOGIN_CSS = `:root{--bg:#000;--card:#16181c;--line:#2f3336;--txt:#e7e9ea;--mut:#71767b;--hover:rgba(231,233,234,.06);--up:#00ba7c;--dn:#f4212e;--accent:#1d9bf0;--btn:#eff3f4;--btntxt:#0f1419;--field:#000;color-scheme:dark}
-html[data-theme=light]{--bg:#fff;--card:#f7f9f9;--line:#eff3f4;--txt:#0f1419;--mut:#536471;--hover:rgba(15,20,25,.04);--btn:#0f1419;--btntxt:#fff;--field:#fff;color-scheme:light}
-html[data-theme=light] .card,html[data-theme=light] .chip{border-color:#e6ecf0}
-html[data-theme=light] input{border-color:#cfd9de}
+const LOGIN_CSS = `:root{--bg:#07090c;--elev:#0e1116;--card:#12151c;--line:rgba(255,255,255,.08);--txt:#f4f6f8;--mut:#8e96a3;--hover:rgba(255,255,255,.045);--up:#16c784;--dn:#ea3943;--accent:#3b82f6;--btn:#f4f6f8;--btntxt:#07090c;--field:#0b0d12;--shadow:0 10px 32px rgba(0,0,0,.38);--radius:16px;color-scheme:dark}
+html[data-theme=light]{--bg:#f3f5f8;--elev:#fff;--card:#fff;--line:#e6e8ee;--txt:#0c1222;--mut:#5c6573;--hover:rgba(15,20,25,.04);--accent:#2563eb;--btn:#0c1222;--btntxt:#fff;--field:#fff;--shadow:0 10px 30px rgba(15,23,42,.08);color-scheme:light}
+html[data-theme=light] .card,html[data-theme=light] .chip{border-color:var(--line)}
+html[data-theme=light] input{border-color:#d5d9e0}
+html[data-theme=light] .wordmark .mark{box-shadow:0 4px 10px rgba(37,99,235,.25)}
 *{box-sizing:border-box}
-html,body{margin:0;min-height:100%;background:var(--bg);color:var(--txt);font:15px/1.35 TwitterChirp,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--txt);font:15px/1.45 ui-sans-serif,"Segoe UI",system-ui,-apple-system,Inter,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .num{font-variant-numeric:tabular-nums}
-.bsehead{display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:8;background:color-mix(in srgb,var(--bg) 88%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
-.wordmark{display:flex;align-items:baseline;gap:10px;color:var(--txt);text-decoration:none;font-weight:800}
+.bsehead{display:flex;align-items:center;gap:12px;padding:0 20px;min-height:60px;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:8;background:color-mix(in srgb,var(--bg) 86%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
+.wordmark{display:flex;align-items:center;gap:10px;color:var(--txt);text-decoration:none;font-weight:800}
 .wordmark:hover{text-decoration:none}
-.wordmark .bse{font-size:22px;letter-spacing:.12em}
-.wordmark .bname{font-size:13px;font-weight:600;color:var(--mut);letter-spacing:0}
+.wordmark .mark{width:28px;height:28px;border-radius:8px;background:linear-gradient(180deg,#3b82f6,#2563eb);display:grid;place-items:center;box-shadow:0 4px 10px rgba(37,99,235,.35)}
+.wordmark .mark svg{width:16px;height:16px;display:block}
+.wordmark .bse{font-size:18px;letter-spacing:.14em}
+.wordmark .bname{font-size:12px;font-weight:600;color:var(--mut);letter-spacing:.01em;padding-left:10px;border-left:1px solid var(--line)}
 .bsehead .grow{flex:1}
 .bsehead .glink{color:var(--mut);font-size:13px;font-weight:600;white-space:nowrap}
-.tape{border-bottom:1px solid var(--line);overflow:hidden;background:var(--bg)}
+.tape{border-bottom:1px solid var(--line);overflow:hidden;background:var(--elev)}
 .track{display:flex;gap:8px;width:max-content;padding:8px 16px;animation:tick 40s linear infinite}
 .tape:hover .track{animation-play-state:paused}
 @keyframes tick{to{transform:translateX(-50%)}}
@@ -994,24 +998,24 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .chip b{letter-spacing:.04em;font-size:12px}
 .chip .chg{font-weight:700;font-variant-numeric:tabular-nums}
 .up{color:var(--up)}.dn{color:var(--dn)}
-.spark{flex:0 0 auto;display:block}
-.wrap{display:grid;place-items:center;padding:32px 16px 48px;min-height:calc(100vh - 120px)}
-.card{width:min(440px,100%);border:1px solid var(--line);border-radius:16px;padding:28px 28px 24px;background:var(--bg)}
-h1{margin:0 0 6px;font-size:26px;letter-spacing:-.02em;font-weight:800}
+.spark{flex:0 0 auto;display:block;width:56px;height:20px}
+.wrap{display:grid;place-items:center;padding:40px 16px 48px;min-height:calc(100vh - 120px)}
+.card{width:min(440px,100%);border:1px solid var(--line);border-radius:var(--radius);padding:32px 28px 24px;background:var(--card);box-shadow:var(--shadow)}
+h1{margin:0 0 6px;font-size:26px;letter-spacing:-.03em;font-weight:800}
 .note{margin:0 0 22px;color:var(--mut);font-size:13px}
 label{display:block;margin:0 0 14px}
-label>span{display:block;font-size:13px;color:var(--mut);margin-bottom:6px}
-input{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--txt);font:inherit}
-input:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
-.error{color:#f4212e;margin:0 0 14px;font-size:14px}
-button{width:100%;min-height:44px;border:0;border-radius:999px;background:var(--btn);color:var(--btntxt);font:inherit;font-weight:700;cursor:pointer;margin-top:4px}
-button:hover{filter:brightness(.92)}
+label>span{display:block;font-size:12.5px;color:var(--mut);margin-bottom:6px;font-weight:600}
+input{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--field);color:var(--txt);font:inherit}
+input:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px rgba(59,130,246,.2)}
+.error{color:var(--dn);margin:0 0 14px;font-size:14px}
+button{width:100%;min-height:46px;border:0;border-radius:999px;background:var(--btn);color:var(--btntxt);font:inherit;font-weight:700;cursor:pointer;margin-top:4px}
+button:hover{filter:brightness(.94)}
 .links{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:16px 0 0;font-size:13px}
 .links a{color:var(--accent)}
 .back{margin:12px 0 0;text-align:center;font-size:13px}
 .fine{margin:28px 0 0;text-align:center;color:var(--mut);font-size:12px}
 .fine a{color:inherit;text-decoration:underline}
-@media(max-width:600px){.wordmark .bname{display:none}.wrap{padding:24px 12px 40px}.card{padding:22px 18px 20px}}`;
+@media(max-width:600px){.wordmark .bname{display:none}.wrap{padding:24px 12px 40px}.card{padding:24px 18px 20px}.bsehead{padding:0 14px;min-height:54px}}`;
 
 async function loginPage(req: Request, opts: { next: string; error?: string; status?: number; challenge?: string; typed?: string; csrf?: string }): Promise<Response> {
 	const inst = settings().instance_name;
@@ -1034,7 +1038,7 @@ async function loginPage(req: Request, opts: { next: string; error?: string; sta
 <script>(function(){var t="dark";try{if(matchMedia("(prefers-color-scheme: light)").matches)t="light"}catch(e){}document.documentElement.setAttribute("data-theme",t);var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content",t==="light"?"#ffffff":"#000000")})()</script>
 <style>${LOGIN_CSS}</style></head>
 <body>
-<header class="bsehead"><a class="wordmark" href="/"><span class="bse">${esc(BSE_SHORT)}</span><span class="bname">${esc(BSE_NAME)}</span></a><div class="grow"></div><a class="glink" href="${esc(PUBLIC_ORIGIN)}">${esc(inst)}</a></header>
+<header class="bsehead"><a class="wordmark" href="/"><span class="mark" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none"><path d="M2 12 L6 7 L9 9.5 L14 3" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="14" cy="3" r="1.4" fill="#fff"/></svg></span><span class="bse">${esc(BSE_SHORT)}</span><span class="bname">${esc(BSE_NAME)}</span></a><div class="grow"></div><a class="glink" href="${esc(PUBLIC_ORIGIN)}">${esc(inst)}</a></header>
 ${tape}
 <div class="wrap"><main class="card">
 <h1>${twoFactor ? "Enter your verification code" : `Sign in to ${esc(BSE_SHORT)}`}</h1>
