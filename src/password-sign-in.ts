@@ -19,7 +19,7 @@ export async function byEmail(typed: string): Promise<string | undefined> {
 	return rows.length === 1 ? rows[0].screen_name : undefined;
 }
 
-export async function passwordStep(typed: string, password: string): Promise<{ session: Session } | { challenge: string } | { error: string }> {
+export async function passwordStep(typed: string, password: string, opts: { bse?: boolean } = {}): Promise<{ session: Session } | { challenge: string } | { error: string }> {
 	typed = typed.trim().replace(/^@/, "");
 	const username = (await byEmail(typed)) ?? typed;
 	// guessing one account's password from many addresses still runs out;
@@ -32,7 +32,7 @@ export async function passwordStep(typed: string, password: string): Promise<{ s
 		refund();
 		return { challenge };
 	}
-	const session = username && password ? await login(username, password) : undefined;
+	const session = username && password ? await login(username, password, opts) : undefined;
 	if (!session) return { error: "Wrong username or password." };
 	refund();
 	return { session };

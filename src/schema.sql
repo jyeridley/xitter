@@ -2072,3 +2072,12 @@ create index if not exists market_auth_tickets_exp on market_auth_tickets (expir
 -- someone has approved them, skip the consent screen on later sign-ins
 alter table oauth_clients add column if not exists redirect_uris text[];
 alter table oauth_clients add column if not exists first_party boolean not null default false;
+
+-- BSE-only accounts (markets.ts): made on the exchange's own site, signed in to
+-- only there, and kept out of the social site's lookups. One may link a Bloxburg
+-- Social account (bse_link_id) for its picture and checkmark; a social account
+-- links to at most one.
+alter table users add column if not exists bse_only boolean not null default false;
+alter table users add column if not exists bse_link_id bigint references users (id) on delete set null;
+alter table users add column if not exists bse_linked_at timestamptz;
+create unique index if not exists users_bse_link_key on users (bse_link_id) where bse_link_id is not null;

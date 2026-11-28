@@ -104,11 +104,11 @@ export async function accountFor(handle: string) {
 	const name = handle.trim().replace(/^@/, "");
 	if (!/^[A-Za-z0-9_]{1,15}(?:@[a-z0-9.-]{1,253}(?::\d{1,5})?)?$/i.test(name)) return null;
 	let [u] = await sql`select id::text, screen_name, name, instance, remote_id::text from users
-		where lower(screen_name) = lower(${name}) and status <> 'suspended' and deactivated_at is null`;
+		where lower(screen_name) = lower(${name}) and status <> 'suspended' and deactivated_at is null and not bse_only`;
 	if (!u && name.includes("@")) {
 		await import("./money-federation").then(({ discoverMoneyAccount }) => discoverMoneyAccount(name)).catch(() => undefined);
 		[u] = await sql`select id::text, screen_name, name, instance, remote_id::text from users
-			where lower(screen_name) = lower(${name}) and status <> 'suspended' and deactivated_at is null`;
+			where lower(screen_name) = lower(${name}) and status <> 'suspended' and deactivated_at is null and not bse_only`;
 	}
 	if (u?.instance && !isPeer(u.instance)) return null;
 	return u ?? null;

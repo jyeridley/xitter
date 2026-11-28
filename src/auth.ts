@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { PUBLIC_ORIGIN } from "./config";
+import { PUBLIC_ORIGIN, isBseHost } from "./config";
 import { sql } from "./db";
 import { newId } from "./ids";
 import { expireSanctions } from "./moderation";
@@ -90,6 +90,8 @@ export type Viewer = User & {
 	postSource?: string;
 	instance?: string | null;
 	superadmin?: boolean;
+	// an account made on the exchange's own site (markets.ts), signed in only there
+	bse_only?: boolean;
 	// a superadmin signed in as this account (impersonate.ts)
 	impersonator?: string | null;
 	impersonator_name?: string | null;
@@ -120,11 +122,13 @@ export async function createUser(screenName: string, name: string, password: str
 	return id;
 }
 
-export async function login(screenName: string, password: string): Promise<{ token: string; csrf: string; userId: string } | undefined> {
+// `bse`: the exchange's own site, the one place BSE-only accounts sign in
+export async function login(screenName: string, password: string, opts: { bse?: boolean } = {}): Promise<{ token: string; csrf: string; userId: string } | undefined> {
+	const bse = !!opts.bse;
 	if (password.length > 1024 || screenName.length > 64) return undefined;
 	await expireSanctions();
 	// accounts with a second factor sign in through the dialog's code step (startSession)
-	const [u] = await sql`select id, password_hash from users where lower(screen_name) = lower(${screenName}) and not totp_enabled and instance is null
+	const [u] = await sql`select id, password_hash from users where lower(screen_name) = lower(${screenName}) and not totp_enabled and instance is null and (${bse} or not bse_only)
 		and (deactivated_at is null or deactivated_at > now() - interval '30 days')`;
 	// verify against a dummy hash when the user is unknown so timing does not reveal it
 	const ok = await Bun.password.verify(password, u?.password_hash ?? DUMMY_HASH).catch(() => false);
@@ -220,12 +224,14 @@ async function loadViewer(req: Request): Promise<Viewer | undefined> {
 	const cookieToken = parseCookies(req)[SESSION_COOKIE];
 	if (!cookieToken) return undefined;
 	const token = sessionKey(cookieToken);
-	const [row] = await sql`select ${viewerCols()}, s.csrf, s.token, s.superadmin, s.impersonator_id::text as impersonator,
+	const [row] = await sql`select ${viewerCols()}, u.bse_only, s.csrf, s.token, s.superadmin, s.impersonator_id::text as impersonator,
 			(select i.screen_name from users i where i.id = s.impersonator_id) as impersonator_name
 		from sessions s join users u on u.id = s.user_id
 		where s.token = ${token} and u.status <> 'suspended' and (s.expires_at is null or s.expires_at > now())
 			and s.last_seen_at > now() - make_interval(days => ${SESSION_IDLE_DAYS})
 			and (u.instance is null or (s.superadmin and s.expires_at is not null))`;
+	// a BSE-only account's session counts on the exchange's own host and nowhere else
+	if (row?.bse_only && !isBseHost(req)) return undefined;
 	// for the admin panel's session list; written at most once a minute, and a
 	// session this server touched within the minute isn't asked again
 	if (row && Date.now() - (touched.get(token) ?? 0) >= TOUCH_MS) {

@@ -250,6 +250,8 @@ export async function redeemBseAuthorizationCode(req: Request, redirect: string,
 	if (!tokenRes.ok || !token?.access_token) return undefined;
 	const [row] = await sql`select user_id::text from api_tokens where token_hash = ${digest(token.access_token)}
 		and client_id = ${BSE_OAUTH_CLIENT_ID}::bigint and (expires_at is null or expires_at > now())`;
+	// the token only proved who signed in; the BSE keeps its own session
+	if (row) await sql`delete from api_tokens where token_hash = ${digest(token.access_token)}`;
 	return row?.user_id;
 }
 

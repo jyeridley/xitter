@@ -10,26 +10,31 @@
 // inside the client with its side bars (tidy.ts frames /i/markets/embed in the
 // main column); frames, ?embed=1 and link fetchers get the page alone.
 
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Viewer } from "./auth";
-import { getViewer, startSession, sessionCookies, clearedCookies, SECURE, sessionKey } from "./auth";
-import { BSE_NAME, BSE_SHORT, PUBLIC_ORIGIN, bseOrigin, isBseHost, isBseHostName, isOwnOrigin, requestOrigin } from "./config";
-import { recordSignIn } from "./login-history";
+import { getViewer, login, startSession, sessionCookies, clearedCookies, SECURE, sessionKey } from "./auth";
+import { BSE_NAME, BSE_OAUTH_CLIENT_ID, BSE_SHORT, PUBLIC_ORIGIN, bseOrigin, isBseHost, isBseHostName, isOwnOrigin, requestOrigin } from "./config";
+import { recordSignIn, requestCountry } from "./login-history";
+import { evadedSuspension, isReserved, usernameProblem } from "./invites";
+import { forgetHeld, handleHeld } from "./held";
+import { blockedNameIn, forbiddenText } from "./names";
+import { looksBlank } from "./text-clean";
+import { newId } from "./ids";
 import { passwordStep } from "./password-sign-in";
 import { loadLook, nightModeCookies } from "./themes/api";
 import { answerChallenge } from "./two-factor";
 import { redeemBseAuthorizationCode } from "./oauth";
 import { sql } from "./db";
-import { hateIn } from "./hate";
+import { hateIn, hateInName } from "./hate";
 import { avatarSrc } from "./model";
 import { serveAvatar } from "./media";
 import { GUEST_ID } from "./blocks";
 import { art, artType } from "./verified-art";
 import { acceptDisclaimer, balanceOf, disclaimerAccepted, disclaimerText, economy } from "./money";
 import { hit, limitedResponse } from "./ratelimit";
-import { feature, hasBlockedPhrase, settings } from "./settings";
+import { NAME_MAX, feature, hasBlockedPhrase, settings } from "./settings";
 import { MONEY_ICON } from "./tidy";
 
 export const MARKETS_PATH = "/i/markets";
@@ -176,7 +181,7 @@ async function reprice(id: string, ticker: string, price: number, why: string, v
 
 // ---------- what the page draws ----------
 
-type Owner = { id: string; handle: string; name: string; badge: string | null; avatar: string; custom: boolean; sq: boolean };
+type Owner = { id: string; handle: string; name: string; bse: boolean; link: string | null; badge: string | null; avatar: string; custom: boolean; sq: boolean };
 const DEFAULT_PFP = "/abs/sticky/default_profile_images/default_profile_normal.png";
 // an account's picture, sized for the market's rows and headers; our own uploads stay
 // on this host's path so they load wherever the market is opened from
@@ -193,8 +198,10 @@ let cache: { key: number; at: number; value: Promise<Shared> } | undefined;
 async function loadShared(): Promise<Shared> {
 	const [rows, hist, index, headlines, events, gap] = await Promise.all([
 		sql`select c.id::text, c.name, c.ticker, c.logo_v, c.logo is not null as has_logo, c.price::float8, c.prev_close::float8, c.shares::float8, c.volume::float8, (extract(epoch from c.listed_at) * 1000)::float8 as listed, c.suspended,
-			coalesce(c.sector, '') as sector, coalesce(c.description, '') as description, u.id::text as owner_id, u.screen_name as owner_handle, u.name as owner_name, u.verified_type as owner_badge, u.avatar_url as owner_avatar
-			from market_companies c left join users u on u.id = c.owner_id and u.status <> 'suspended' and u.deactivated_at is null order by c.id`,
+			coalesce(c.sector, '') as sector, coalesce(c.description, '') as description, u.id::text as owner_id, u.screen_name as owner_handle, u.name as owner_name, u.bse_only as owner_bse, l.screen_name as owner_link,
+			case when u.bse_only then l.verified_type else u.verified_type end as owner_badge, case when u.bse_only then l.avatar_url else u.avatar_url end as owner_avatar
+			from market_companies c left join users u on u.id = c.owner_id and u.status <> 'suspended' and u.deactivated_at is null
+			left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null order by c.id`,
 		sql`select company_id::text as c, (extract(epoch from t) * 1000)::float8 as t, price::float8 as p from (select company_id, t, price, id, row_number() over (partition by company_id order by id desc) rn from market_history) x where rn <= ${HIST_SENT} order by company_id, id`,
 		sql`select (extract(epoch from t) * 1000)::float8 as t, value from (select * from market_index order by id desc limit ${INDEX}) x order by id`,
 		sql`select id::text, text, cat, ticker, breaking, (extract(epoch from created_at) * 1000)::float8 as t from market_headlines order by id desc limit 100`,
@@ -206,7 +213,7 @@ async function loadShared(): Promise<Shared> {
 	return {
 		companies: rows.map((c: any) => {
 			const logo = c.has_logo ? `${MARKETS_PATH}/logo/${c.id}?v=${c.logo_v}` : "";
-			const owner: Owner | null = c.owner_id ? { id: c.owner_id, handle: c.owner_handle, name: c.owner_name, badge: c.owner_badge ?? null, avatar: pfpOf(c.owner_avatar), custom: !!c.owner_avatar, sq: squareBadge(c.owner_badge) } : null;
+			const owner: Owner | null = c.owner_id ? { id: c.owner_id, handle: c.owner_handle, name: c.owner_name, bse: !!c.owner_bse, link: c.owner_link ?? null, badge: c.owner_badge ?? null, avatar: pfpOf(c.owner_avatar), custom: !!c.owner_avatar, sq: squareBadge(c.owner_badge) } : null;
 			// the founder's own picture first, then an uploaded logo, then the founder's default one; none at all draws the ticker
 			const img = owner?.custom ? owner.avatar : logo || owner?.avatar || "";
 			return {
@@ -237,7 +244,9 @@ function shared(): Promise<Shared> {
 async function account(viewer: Viewer) {
 	const on = moneyOn();
 	const [[u], holdings, txns, [owned]] = await Promise.all([
-		sql`select verified_type, status, name, avatar_url from users where id = ${viewer.id}`,
+		sql`select u.status, u.name, u.bse_only, case when u.bse_only then l.verified_type else u.verified_type end as verified_type,
+			case when u.bse_only then l.avatar_url else u.avatar_url end as avatar_url, l.screen_name as link_handle
+			from users u left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null where u.id = ${viewer.id}`,
 		sql`select company_id::text as id, qty, cost from market_holdings where user_id = ${viewer.id}`,
 		sql`select side, ticker, qty, price::float8, coalesce(total_cents::float8 / 100, total::float8) as total, (extract(epoch from created_at) * 1000)::float8 as t from market_txns where user_id = ${viewer.id} order by id desc limit 100`,
 		sql`select count(*)::int as n from market_companies where owner_id = ${viewer.id}`,
@@ -248,6 +257,8 @@ async function account(viewer: Viewer) {
 	const canList = !!u && u.status !== "restricted" && u.status !== "suspended";
 	return {
 		handle: viewer.screen_name,
+		bse: !!u?.bse_only,
+		link: u?.link_handle ?? null,
 		name: u?.name ?? viewer.screen_name,
 		avatar: pfpOf(u?.avatar_url),
 		sq: squareBadge(u?.verified_type),
@@ -1050,36 +1061,69 @@ button:hover{background:#222}
 .links{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:16px 0 0;font-size:13px}
 .links a{color:var(--deep)}
 .back{margin:12px 0 0;text-align:center;font-size:13px}
+label small{display:block;margin-top:6px;color:var(--mut);font-size:12px}
+label i{font-style:normal;font-weight:400;color:var(--mut)}
+.note.small{font-size:12.5px;margin:-2px 0 16px}
+.or{display:flex;align-items:center;gap:12px;margin:20px 0 14px;color:var(--mut);font-size:13px}
+.or::before,.or::after{content:"";flex:1;border-top:1px solid var(--line)}
+.btn{display:flex;align-items:center;justify-content:center;min-height:48px;border:2px solid #000;background:#000;color:#fff;font:600 1rem var(--sans);text-decoration:none;padding:0 18px}
+.btn:hover{background:#222;text-decoration:none}
+.btn.alt,button.alt{background:#fff;color:#000}
+.btn.alt:hover,button.alt:hover{background:var(--band)}
+.ok{color:var(--up);margin:0 0 14px;font-size:14px}
+h2{font-size:1.1rem;margin:22px 0 10px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink)}
+.facts{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;margin:8px 0 6px;font-size:15px}
+.facts dt{color:var(--mut);font-weight:600;font-size:13px;padding-top:2px}
+.facts dd{margin:0;color:var(--ink);overflow-wrap:anywhere}
+.tag{display:inline-block;margin-left:6px;padding:1px 6px;border:1px solid #000;font-size:11px;font-weight:700;letter-spacing:.02em;vertical-align:2px}
+.linked{display:flex;align-items:center;gap:12px;margin:4px 0 12px}
+.linked img:first-child{width:48px;height:48px;border-radius:50%;object-fit:cover}
+.linked img.sq{border-radius:6px}
+.linked .ck{width:18px;height:18px;vertical-align:-3px;margin-left:4px}
 .fine{margin:28px 0 0;text-align:center;color:var(--mut);font-size:12px}
 .fine a{color:inherit;text-decoration:underline}
 @media(max-width:800px){.hnav{display:none}}
 @media(max-width:700px){.tick-mkt{width:88px;padding:0 12px}.tape{padding:18px 16px 6px}.bsehead{padding:0 16px;height:64px}.logo-wrap .logo{height:36px}.wrap{padding:28px 12px 40px}.card{padding:28px 20px 22px}}`;
 
-async function loginPage(req: Request, opts: { next: string; error?: string; status?: number; challenge?: string; typed?: string; csrf?: string }): Promise<Response> {
+// ---------- the exchange's own pages around accounts: sign in, sign up, settings ----------
+const AUTH_NAV = `<nav class="hnav" aria-label="Primary"><a href="/markets">Listings</a><a href="/portfolio">Trading</a><a href="/overview">Market Data</a><a href="/#insights">Insights</a><a href="/#about">About</a></nav>`;
+async function bsePage(title: string, main: string, opts: { status?: number; csrf?: string; description?: string } = {}): Promise<Response> {
 	const inst = settings().instance_name;
-	const csrf = opts.csrf || loginCsrfFrom(req) || newLoginCsrf();
-	const next = opts.next;
 	const tape = await marketTape();
-	const twoFactor = !!opts.challenge;
-	const title = twoFactor ? `Enter your code · ${BSE_SHORT}` : `Sign in · ${BSE_SHORT}`;
-	const fields = twoFactor
-		? `<input type="hidden" name="challenge" value="${esc(opts.challenge!)}">
-<label><span>Verification code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" autofocus required aria-label="Verification code"></label>`
-		: `<label><span>Username or email</span><input name="username" value="${esc(opts.typed ?? "")}" autocomplete="username" autocapitalize="off" spellcheck="false" maxlength="320" required autofocus></label>
-<label><span>Password</span><input name="password" type="password" autocomplete="current-password" maxlength="1024" required></label>`;
 	const html = `<!DOCTYPE html>
 <html lang="en" data-theme="light" data-site="bse"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${esc(title)}</title>
 ${BSE_ICONS}
 <meta name="theme-color" content="#ffffff">
-<meta name="description" content="Sign in to ${esc(BSE_NAME)} with your ${esc(inst)} account.">
+<meta name="description" content="${esc(opts.description ?? `Your ${BSE_NAME} account.`)}">
 <style>${LOGIN_CSS}</style></head>
 <body>
-<header class="bsehead"><a class="wordmark" href="/" aria-label="${esc(BSE_SHORT)}">${BSE_WORDMARK}<span class="bname">${esc(BSE_NAME)}</span></a><nav class="hnav" aria-label="Primary"><a href="/markets">Listings</a><a href="/portfolio">Trading</a><a href="/overview">Market Data</a><a href="/#insights">Insights</a><a href="/#about">About</a></nav><div class="grow"></div><a class="glink" href="${esc(PUBLIC_ORIGIN)}">${esc(inst)}</a></header>
+<header class="bsehead"><a class="wordmark" href="/" aria-label="${esc(BSE_SHORT)}">${BSE_WORDMARK}<span class="bname">${esc(BSE_NAME)}</span></a>${AUTH_NAV}<div class="grow"></div><a class="glink" href="${esc(PUBLIC_ORIGIN)}">${esc(inst)}</a></header>
 ${tape}
 <div class="wrap"><main class="card">
-<h1>${twoFactor ? "Enter your verification code" : `Sign in to ${esc(BSE_SHORT)}`}</h1>
-<p class="note">${twoFactor ? `Open your authenticator app and enter the code for ${esc(inst)}, or use a backup code.` : `Uses your ${esc(inst)} account.`}</p>
+${main}
+</main></div>
+<p class="fine"><a href="/">${esc(BSE_NAME)}</a> · © 2026 Bloxburg Stock Exchange. Independent community project. Not affiliated with Roblox, Welcome to Bloxburg or the NYSE.</p>
+</body></html>`;
+	const headers = new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
+	if (opts.csrf) headers.append("set-cookie", loginCsrfCookie(opts.csrf));
+	return new Response(html, { status: opts.status ?? 200, headers });
+}
+
+async function loginPage(req: Request, opts: { next: string; error?: string; status?: number; challenge?: string; typed?: string; csrf?: string }): Promise<Response> {
+	const inst = settings().instance_name;
+	const csrf = opts.csrf || loginCsrfFrom(req) || newLoginCsrf();
+	const next = opts.next;
+	const twoFactor = !!opts.challenge;
+	const title = twoFactor ? `Enter your code · ${BSE_SHORT}` : `Sign in · ${BSE_SHORT}`;
+	const fields = twoFactor
+		? `<input type="hidden" name="challenge" value="${esc(opts.challenge!)}">
+<label><span>Verification code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" autofocus required aria-label="Verification code"></label>`
+		: `<label><span>Username</span><input name="username" value="${esc(opts.typed ?? "")}" autocomplete="username" autocapitalize="off" spellcheck="false" maxlength="320" required autofocus></label>
+<label><span>Password</span><input name="password" type="password" autocomplete="current-password" maxlength="1024" required></label>`;
+	const q = `?next=${encodeURIComponent(next)}`;
+	const main = `<h1>${twoFactor ? "Enter your verification code" : `Sign in to ${esc(BSE_SHORT)}`}</h1>
+<p class="note">${twoFactor ? `Open your authenticator app and enter the code for ${esc(inst)}, or use a backup code.` : `Use your BSE account. If you've always traded with your ${esc(inst)} account, its username and password still work here.`}</p>
 ${opts.error ? `<p class="error" role="alert">${esc(opts.error)}</p>` : ""}
 <form method="post" action="/login" autocomplete="on">
 <input type="hidden" name="csrf" value="${esc(csrf)}">
@@ -1087,13 +1131,167 @@ ${opts.error ? `<p class="error" role="alert">${esc(opts.error)}</p>` : ""}
 ${fields}
 <button type="submit">${twoFactor ? "Verify" : "Sign in"}</button>
 </form>
-${twoFactor ? `<p class="back"><a href="/login?next=${encodeURIComponent(next)}">Back to sign in</a></p>` : `<p class="links"><a href="${esc(PUBLIC_ORIGIN)}/account/forgot">Forgot password</a><a href="${esc(PUBLIC_ORIGIN)}/i/flow/signup">Create a ${esc(inst)} account</a></p>`}
-</main></div>
-<p class="fine">${esc(inst)} account · <a href="/">${esc(BSE_NAME)}</a> · © 2026 Bloxburg Stock Exchange. Independent community project. Not affiliated with Roblox, Welcome to Bloxburg or the NYSE.</p>
-</body></html>`;
-	const headers = new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
-	headers.append("set-cookie", loginCsrfCookie(csrf));
-	return new Response(html, { status: opts.status ?? 200, headers });
+${twoFactor
+	? `<p class="back"><a href="/login${q}">Back to sign in</a></p>`
+	: `<div class="or"><span>or</span></div>
+<a class="btn alt" href="/auth/bs${q}">Sign in with ${esc(inst)}</a>
+<p class="links"><a href="/signup${q}">Create a BSE account</a><a href="${esc(PUBLIC_ORIGIN)}/account/forgot">Forgot a ${esc(inst)} password</a></p>`}`;
+	return bsePage(title, main, { status: opts.status, csrf, description: `Sign in to ${BSE_NAME} with a BSE account or your ${inst} account.` });
+}
+
+async function signupPage(req: Request, opts: { next: string; error?: string; status?: number; typed?: { username?: string; name?: string }; csrf?: string }): Promise<Response> {
+	const inst = settings().instance_name;
+	const csrf = opts.csrf || loginCsrfFrom(req) || newLoginCsrf();
+	const q = `?next=${encodeURIComponent(opts.next)}`;
+	const main = `<h1>Create a BSE account</h1>
+<p class="note">Trade, hold Money and list companies without a ${esc(inst)} account. You can link one later in your account settings.</p>
+${opts.error ? `<p class="error" role="alert">${esc(opts.error)}</p>` : ""}
+<form method="post" action="/signup" autocomplete="on">
+<input type="hidden" name="csrf" value="${esc(csrf)}">
+<input type="hidden" name="next" value="${esc(opts.next)}">
+<label><span>Username</span><input name="username" value="${esc(opts.typed?.username ?? "")}" autocomplete="username" autocapitalize="off" spellcheck="false" minlength="3" maxlength="15" pattern="[A-Za-z0-9_]{3,15}" required autofocus aria-describedby="un-help"><small id="un-help">3–15 letters, digits or underscores. Usernames are shared with ${esc(inst)}, so a taken handle can't be used.</small></label>
+<label><span>Display name <i>optional</i></span><input name="name" value="${esc(opts.typed?.name ?? "")}" autocomplete="nickname" maxlength="${NAME_MAX}"></label>
+<label><span>Password</span><input name="password" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
+<label><span>Confirm password</span><input name="password2" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
+<p class="note small">A BSE account has no email, so it can't be reset by email. Link a ${esc(inst)} account in settings to be able to sign in with it too.</p>
+<button type="submit">Create account</button>
+</form>
+<p class="links"><a href="/login${q}">I already have an account</a></p>`;
+	return bsePage(`Create an account · ${BSE_SHORT}`, main, { status: opts.status, csrf, description: `Create a ${BSE_NAME} account.` });
+}
+
+// a BSE-only account: a row in users marked bse_only, its password hashed as
+// every other account's is (auth.ts createUser); the same handle rules as
+// sign-up on the social site (invites.ts), so a social handle can't be taken
+async function bseSignUp(f: { username: string; name: string; password: string; password2: string; ip: string | null; country: string | null }): Promise<string> {
+	const screenName = f.username.trim().replace(/^@/, "");
+	const name = looksBlank(f.name) ? screenName : f.name.trim();
+	if (settings().signup_mode === "closed") throw new Refusal("Sign-up is closed right now.");
+	const problem = usernameProblem(screenName);
+	if (problem) throw new Refusal(problem);
+	if (isReserved(screenName)) throw new Refusal("That username is reserved.");
+	if (await handleHeld(screenName)) throw new Refusal("That username isn't available.");
+	if (blockedNameIn(screenName, name) || hateInName(screenName, name) || forbiddenText(name)) throw new Refusal("That username or name isn't allowed here.");
+	if (name.length > NAME_MAX) throw new Refusal(`Names are at most ${NAME_MAX} characters.`);
+	if (f.password.length < 8) throw new Refusal("Passwords are at least 8 characters.");
+	if (f.password.length > 256) throw new Refusal("Passwords are at most 256 characters.");
+	if (f.password !== f.password2) throw new Refusal("The passwords don't match.");
+	if (await evadedSuspension(null, f.ip)) throw new Refusal("Sign-up isn't available for you right now.");
+	const hash = await Bun.password.hash(f.password);
+	const id = newId();
+	await sql.begin(async (tx) => {
+		const [taken] = await tx`select 1 from users where lower(screen_name) = lower(${screenName})`;
+		if (taken) throw new Refusal("That username is taken.");
+		await tx`insert into users (id, screen_name, name, password_hash, bse_only, signup_source, signup_country)
+			values (${id}::bigint, ${screenName}, ${name}, ${hash}, true, 'BSE', ${f.country})`;
+	});
+	forgetHeld();
+	return id;
+}
+
+async function bseSignupRoute(req: Request, viewer: Viewer | undefined): Promise<Response> {
+	const url = new URL(req.url);
+	if (viewer) return Response.redirect(bseNext(url.searchParams.get("next")), 302);
+	if (req.method === "GET" || req.method === "HEAD") return signupPage(req, { next: bseNext(url.searchParams.get("next")) });
+	if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+	const form = await req.formData().catch(() => undefined);
+	const field = (k: string) => String(form?.get(k) ?? "");
+	const next = bseNext(field("next") || url.searchParams.get("next"));
+	const typed = { username: field("username").trim(), name: field("name") };
+	if (!form || !validLoginPost(req, field("csrf"))) return signupPage(req, { next, error: "That form expired. Try again.", status: 403, typed });
+	const ip = optsIp(req);
+	const h = hit("auth", ip);
+	if (!h.ok) return limitedResponse(h);
+	// new accounts from one address: a few an hour
+	const made = hit("mail", `bse-signup:${ip}`);
+	if (!made.ok) return signupPage(req, { next, error: "Too many new accounts from your network. Try again later.", status: 429, typed });
+	try {
+		await bseSignUp({ username: field("username"), name: field("name"), password: field("password"), password2: field("password2"), ip: ip === "unknown" ? null : ip, country: requestCountry(req) ?? null });
+	} catch (e) {
+		if (e instanceof Refusal) return signupPage(req, { next, error: e.message, status: 400, typed });
+		throw e;
+	}
+	const session = await login(typed.username.replace(/^@/, ""), field("password"), { bse: true });
+	if (!session) return loginPage(req, { next, error: "Your account was made. Sign in to continue.", typed: typed.username });
+	return finishBseSignIn(req, session, next);
+}
+
+// "Sign in with Bloxburg Social" and linking one: Xitter's own authorization
+// code + PKCE flow on the social site, where its sign-in proves the account
+function oauthCookie(payload: string): string {
+	return `${OAUTH_COOKIE}=${encodeURIComponent(payload)}; Path=/; HttpOnly; Max-Age=600; SameSite=Lax${SECURE}`;
+}
+const urlRandom = (n: number) => randomBytes(n).toString("base64url");
+const challengeFor = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
+async function bseAuthStart(req: Request, viewer: Viewer | undefined): Promise<Response> {
+	const url = new URL(req.url);
+	const link = url.searchParams.has("link");
+	const next = link ? "/account" : bseNext(url.searchParams.get("next"));
+	if (link && !viewer) return Response.redirect(`/login?next=${encodeURIComponent("/account")}`, 302);
+	if (link && !viewer!.bse_only) return Response.redirect("/account", 302);
+	if (!link && viewer) return Response.redirect(next, 302);
+	const h = hit("auth", optsIp(req));
+	if (!h.ok) return limitedResponse(h);
+	const redirect = `${requestOrigin(req)}/auth/callback`;
+	const state = urlRandom(24), verifier = urlRandom(32);
+	const payload = Buffer.from(JSON.stringify({ state, verifier, next, redirect, mode: link ? "link" : "signin", uid: link ? viewer!.id : null }), "utf8").toString("base64url");
+	const params = new URLSearchParams({ response_type: "code", client_id: BSE_OAUTH_CLIENT_ID, redirect_uri: redirect, scope: "read", state, code_challenge: challengeFor(verifier), code_challenge_method: "S256" });
+	const headers = new Headers({ location: `${PUBLIC_ORIGIN}/oauth/authorize?${params}`, "cache-control": "no-store" });
+	headers.append("set-cookie", oauthCookie(payload));
+	return new Response(null, { status: 302, headers });
+}
+
+const ACCOUNT_NOTES: Record<string, [string, boolean]> = {
+	linked: ["Your Bloxburg Social account is linked.", false],
+	unlinked: ["Your Bloxburg Social account is unlinked.", false],
+	taken: ["That Bloxburg Social account is already linked to another BSE account.", true],
+	self: ["That account can't be linked.", true],
+	expired: ["That took too long. Try linking again.", true],
+	failed: ["Bloxburg Social didn't finish signing in. Try again.", true],
+};
+async function accountPage(req: Request, viewer: Viewer): Promise<Response> {
+	const inst = settings().instance_name;
+	const [u] = await sql`select u.screen_name, u.name, u.bse_only, u.created_at, u.bse_linked_at,
+			l.screen_name as l_handle, l.name as l_name, l.avatar_url as l_avatar, l.verified_type as l_badge
+		from users u left join users l on l.id = u.bse_link_id where u.id = ${viewer.id}::bigint`;
+	const m = ACCOUNT_NOTES[new URL(req.url).searchParams.get("m") ?? ""];
+	const note = m ? `<p class="${m[1] ? "error" : "ok"}" role="status">${esc(m[0])}</p>` : "";
+	const check = (t: string | null) => {
+		const at = artType(t), src = at && art(at);
+		return src ? `<img class="ck" src="${esc(src)}" alt="${t === "business" ? "Verified organization" : t === "blue" ? "Verified account" : "Government account"}">` : "";
+	};
+	let body: string;
+	if (u.bse_only) {
+		const linked = u.l_handle
+			? `<div class="linked"><img src="${esc(pfpOf(u.l_avatar))}" alt="" class="${squareBadge(u.l_badge) ? "sq" : ""}"><div><b>${esc(u.l_name)}</b>${check(u.l_badge)}<div class="note">@${esc(u.l_handle)} · linked ${esc(new Date(u.bse_linked_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }))}</div></div></div>
+<p class="note">Its picture and checkmark show on your account and companies here, and "Sign in with ${esc(inst)}" signs in to this account. Balances stay separate.</p>
+<form method="post" action="/account/unlink"><input type="hidden" name="csrf" value="${esc(viewer.csrf)}"><button type="submit" class="alt">Unlink ${esc(inst)} account</button></form>`
+			: `<p class="note">Link a ${esc(inst)} account to show its picture and checkmark here and to sign in with it. You'll sign in on ${esc(inst)} to prove it's yours.</p>
+<a class="btn" href="/auth/bs?link=1">Link a ${esc(inst)} account</a>`;
+		body = `<dl class="facts"><dt>Username</dt><dd>${esc(u.screen_name)} <span class="tag">BSE account</span></dd><dt>Name</dt><dd>${esc(u.name)}</dd><dt>Joined</dt><dd>${esc(new Date(u.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }))}</dd></dl>
+<h2>${esc(inst)} account</h2>${linked}`;
+	} else {
+		body = `<dl class="facts"><dt>Username</dt><dd>@${esc(u.screen_name)} <span class="tag">${esc(inst)} account</span></dd><dt>Name</dt><dd>${esc(u.name)}</dd></dl>
+<p class="note">You sign in to ${esc(BSE_SHORT)} with your ${esc(inst)} account. Your balance, holdings and companies stay tied to it. Change your picture, name or password on <a href="${esc(PUBLIC_ORIGIN)}/settings/account">${esc(inst)}</a>.</p>`;
+	}
+	const main = `<h1>Your account</h1>${note}${body}
+<p class="links"><a href="/portfolio">Portfolio</a><a href="/logout">Sign out</a></p>`;
+	return bsePage(`Account · ${BSE_SHORT}`, main);
+}
+async function bseAccountRoute(req: Request, viewer: Viewer | undefined, p: string): Promise<Response> {
+	if (!viewer) return Response.redirect(`/login?next=${encodeURIComponent("/account")}`, 302);
+	if (p === "/account" || p === "/settings") {
+		if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405 });
+		return accountPage(req, viewer);
+	}
+	// /account/unlink
+	if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+	const form = await req.formData().catch(() => undefined);
+	const origin = req.headers.get("origin");
+	if (!form || origin !== requestOrigin(req) || !sameCsrf(String(form.get("csrf") ?? ""), viewer.csrf)) return new Response("This form expired. Go back and try again.", { status: 403 });
+	await sql`update users set bse_link_id = null, bse_linked_at = null where id = ${viewer.id}::bigint and bse_only`;
+	changed++;
+	return Response.redirect("/account?m=unlinked", 303);
 }
 
 async function finishBseSignIn(req: Request, session: { token: string; csrf: string; userId: string }, next: string): Promise<Response> {
@@ -1130,35 +1328,59 @@ async function bseLogin(req: Request, viewer: Viewer | undefined): Promise<Respo
 		if (answered.unknown) return loginPage(req, { next, error: "That sign-in took too long. Enter your password again.", status: 401 });
 		return loginPage(req, { next, error: answered.error ?? "That code isn't right.", status: 401, challenge: answered.error?.startsWith("Too many") ? undefined : field("challenge") });
 	}
-	const step = await passwordStep(field("username"), field("password"));
+	const step = await passwordStep(field("username"), field("password"), { bse: true });
 	if ("challenge" in step) return loginPage(req, { next, challenge: step.challenge });
 	if ("error" in step) return loginPage(req, { next, error: step.error, status: step.error.startsWith("Too many") ? 429 : 401, typed: field("username").trim() });
 	return finishBseSignIn(req, step.session, next);
 }
 
 
-// leftover OAuth callback from earlier handoff links still works
+// back from Bloxburg Social: sign in (to the BSE account linked to it, or the
+// social account itself, as before), or link it to the signed-in BSE account
 async function bseAuthCallback(req: Request): Promise<Response> {
 	const url = new URL(req.url);
 	const nextGuess = bseNext(url.searchParams.get("next"));
-	let stored: { state?: string; verifier?: string; next?: string; redirect?: string } | undefined;
+	let stored: { state?: string; verifier?: string; next?: string; redirect?: string; mode?: string; uid?: string | null } | undefined;
 	try {
 		const raw = parseCookie(req, OAUTH_COOKIE);
 		if (raw) stored = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
 	} catch {}
 	const next = bseNext(stored?.next ?? nextGuess);
-	if (url.searchParams.get("error") === "access_denied") return oauthErrorPage("You cancelled signing in.", next);
-	if (url.searchParams.get("error")) return oauthErrorPage("Bloxburg Social couldn't authorize this sign-in.", next);
+	const linking = stored?.mode === "link";
+	const back = (m: string) => {
+		const headers = new Headers({ location: `/account?m=${m}` });
+		headers.append("set-cookie", `${OAUTH_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${SECURE}`);
+		return new Response(null, { status: 303, headers });
+	};
+	if (url.searchParams.get("error") === "access_denied") return linking ? back("failed") : oauthErrorPage("You cancelled signing in.", next);
+	if (url.searchParams.get("error")) return linking ? back("failed") : oauthErrorPage("Bloxburg Social couldn't authorize this sign-in.", next);
 	const code = url.searchParams.get("code") ?? "", state = url.searchParams.get("state") ?? "";
-	if (!stored?.verifier || !stored.redirect || !state || state !== stored.state) return oauthErrorPage("That sign-in expired. Try again.", next);
+	if (!stored?.verifier || !stored.redirect || !state || !sameCsrf(state, stored.state ?? "")) return linking ? back("expired") : oauthErrorPage("That sign-in expired. Try again.", next);
 	const h = hit("auth", optsIp(req));
 	if (!h.ok) return limitedResponse(h);
 	const userId = await redeemBseAuthorizationCode(req, stored.redirect, code, stored.verifier);
-	if (!userId) return oauthErrorPage("Bloxburg Social didn't finish authorizing this sign-in.", next);
+	if (!userId) return linking ? back("failed") : oauthErrorPage("Bloxburg Social didn't finish authorizing this sign-in.", next);
+	if (linking) {
+		const viewer = await getViewer(req);
+		if (!viewer || !viewer.bse_only || viewer.id !== stored.uid) return back("expired");
+		const [target] = await sql`select bse_only, status from users where id = ${userId}::bigint and deactivated_at is null`;
+		if (!target || target.bse_only || target.status === "suspended" || userId === viewer.id) return back("self");
+		try {
+			const done = await sql`update users set bse_link_id = ${userId}::bigint, bse_linked_at = now() where id = ${viewer.id}::bigint and bse_only
+				and not exists (select 1 from users o where o.bse_link_id = ${userId}::bigint and o.id <> ${viewer.id}::bigint) returning id`;
+			if (!done.length) return back("taken");
+		} catch {
+			return back("taken");
+		}
+		changed++;
+		return back("linked");
+	}
+	const [linked] = await sql`select id::text from users where bse_link_id = ${userId}::bigint and bse_only and status <> 'suspended' and deactivated_at is null`;
 	try {
-		const session = await startSession(userId);
-		await recordSignIn(req, session);
-		return signedInOn(session, next);
+		const session = await startSession(linked?.id ?? userId);
+		const res = await finishBseSignIn(req, session, next);
+		res.headers.append("set-cookie", `${OAUTH_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${SECURE}`);
+		return res;
 	} catch {
 		return oauthErrorPage("That account can't sign in right now.", next);
 	}
@@ -1200,6 +1422,9 @@ export async function bseSite(req: Request, opts: { ip: string }): Promise<Respo
 	if (BSE_PASS.some((r) => r.test(p))) return;
 	const viewer = await getViewer(req);
 	if (p === "/login") return bseLogin(req, viewer);
+	if (p === "/signup" || p === "/join") return bseSignupRoute(req, viewer);
+	if (p === "/auth/bs") return bseAuthStart(req, viewer);
+	if (p === "/account" || p === "/settings" || p === "/account/unlink") return bseAccountRoute(req, viewer, p);
 	if (p === "/auth" || p === "/auth/" || p === "/auth/callback" || p === "/auth/callback/") return bseAuthCallback(req);
 	if (p === "/logout") return bseLogout(url.searchParams.get("next") ?? "/");
 	if (p === MARKETS_PATH || p.startsWith(`${MARKETS_PATH}/`)) {

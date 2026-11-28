@@ -64,6 +64,7 @@ html[data-site=bse] .wordmark .bname{display:none}
 .acctm a,.acctm .rowl{display:block;padding:10px 10px;border-radius:0;color:var(--ink);text-decoration:none;font-weight:600;font-size:13px}
 .acctm a:hover{background:var(--band);text-decoration:none}
 .acctm .lbl{padding:4px 10px 8px}
+.bsetag{display:inline-block;padding:0 5px;border:1px solid currentColor;font:700 10px/16px var(--sans);letter-spacing:.03em;vertical-align:1px;color:var(--ink)}
 .bsehead .glink{color:var(--mut);font-size:13px;font-weight:500;white-space:nowrap}
 .bsehead .me{display:flex;align-items:center;gap:8px;color:var(--ink);text-decoration:none;font-weight:600;font-size:14px}
 .bsehead .me:hover{text-decoration:none}
@@ -513,7 +514,12 @@ var pill=function(x){return '<span class="pill '+(x>=0?'up':'dn')+'">'+(x>=0?ARR
 var logo=function(c,cls){return c.img?'<img class="logo-img '+(cls||'')+(c.sq?'':' round')+'" src="'+esc(c.img)+'" alt="" data-tk="'+esc(c.ticker.slice(0,4))+'">':'<span class="logo-img '+(cls||'')+'">'+esc(c.ticker.slice(0,4))+'</span>'};
 // its name with the founder's checkmark
 function nm(c,cls){return '<div class="nm '+(cls||'')+'"><span>'+esc(c.name)+'</span>'+badge(c.owner&&c.owner.badge)+'</div>'}
-function founder(o){if(!o)return '';return '<a class="founder'+(o.sq?' sq':'')+'" href="/'+esc(o.handle)+'" data-client="/'+esc(o.handle)+'"><img src="'+esc(o.avatar)+'" alt=""><b>'+esc(o.name)+'</b>'+badge(o.badge)+'<span class=lbl>@'+esc(o.handle)+'</span></a>'}
+// a BSE-only account shows its username with a BSE tag, never as an @handle: those are Bloxburg Social's
+function who(a){return a&&a.bse?esc(a.handle)+' <span class=bsetag>BSE</span>':'@'+esc(a.handle)}
+function founder(o){if(!o)return '';
+ var inner='<img src="'+esc(o.avatar)+'" alt=""><b>'+esc(o.name)+'</b>'+badge(o.badge)+'<span class=lbl>'+who(o)+(o.bse&&o.link?' · @'+esc(o.link):'')+'</span>';
+ var to=o.bse?o.link:o.handle;
+ return to?'<a class="founder'+(o.sq?' sq':'')+'" href="/'+esc(to)+'" data-client="/'+esc(to)+'">'+inner+'</a>':'<span class="founder'+(o.sq?' sq':'')+'">'+inner+'</span>'}
 function headlines(){
  if(!db.headlines.length)return '';
  return '<div class=news><span class="tag live">MARKET HEADLINES</span><div class=track>'+db.headlines.map(function(h){return (h.brk?'<span class="tag brk">BREAKING</span>':'')+'<span class=lbl>'+esc(h.cat)+'</span><span>'+(h.ticker?'<b>'+esc(h.ticker)+'</b> ':'')+esc(h.text)+'</span>'}).join('<span class=dot>·</span>')+'</div></div>'}
@@ -779,7 +785,7 @@ function updateLive(){var c=C(S.cid);if(!c)return;var l=$('#live');if(l&&!l.quer
 function trade(){var c=C(S.cid),q=Math.floor(+$('#qty').value);
  if(!c||!(q>0)||BUSY)return;BUSY=true;$('#tk-go').disabled=true;
  api('trade',{id:c.id,side:S.side,qty:q}).then(function(st){BUSY=false;db=st;S.q='';render();toast((S.side==='buy'?'Bought ':'Sold ')+qn(q)+' '+c.ticker+' for '+fmt(q*c.price))},function(e){BUSY=false;toast(e.message,true);updTicket()})}
-function acct(){if(!db.me)return '<main><div class="card empty"><h2>Your portfolio</h2><p>Sign in to trade with your money.</p><button class=primary data-client="'+signInHref()+'">Sign in</button></div></main>';
+function acct(){if(!db.me)return '<main><div class="card empty"><h2>Your portfolio</h2><p>Sign in to trade with your money.</p><button class=primary data-client="'+signInHref()+'">Sign in</button>'+(SITE==='bse'?'<p style="margin-top:14px"><a href="/signup?next=%2Fportfolio">No account? Create a BSE account</a></p>':'')+'</div></main>';
  var a=db.me;
  var rows=Object.keys(a.holdings).map(function(id){var c=C(id),p=a.holdings[id];return c?{c:c,qty:p.qty,cost:p.cost,v:c.price*p.qty}:null}).filter(Boolean).sort(function(x,y){return y.v-x.v});
  var val=rows.reduce(function(s,e){return s+e.v},0),cost=rows.reduce(function(s,e){return s+e.cost},0),ret=val-cost,day=dayPnL();
@@ -787,7 +793,7 @@ function acct(){if(!db.me)return '<main><div class="card empty"><h2>Your portfol
  +'<div class="num '+(day>=0?'up':'dn')+'" style="margin-top:8px;font-weight:700">'+(day>=0?'+':'−')+fmt(Math.abs(day))+' today</div>'
  +'<div class=row style="gap:20px;margin-top:14px">'+(a.cash==null?'':'<div style="flex:0 0 auto"><div class=lbl>Money</div><div style="font-weight:700" class=num>'+fmt(a.cash)+'</div></div>')+'<div style="flex:0 0 auto"><div class=lbl>In shares</div><div style="font-weight:700" class=num>'+fmt(val)+'</div></div><div style="flex:0 0 auto"><div class=lbl>Return</div><div style="font-weight:700" class="num '+(ret>=0?'up':'dn')+'">'+(ret>=0?'+':'−')+fmt(Math.abs(ret))+'</div></div></div></div>'
  +'<div class=tile><div class=lbl>Allocation</div>'+allocBlock()+'</div></div>'
- +'<div class=panel style="padding:0"><div class=hd><h3>Holdings</h3><span class=lbl>@'+esc(a.handle)+'</span></div>'+(rows.length?'<div class="tr th hold"><div>Company</div><div>Shares</div><div>Price</div><div>Value</div><div>Return</div><div>Chart</div></div>'+rows.map(function(e){var r=e.v-e.cost,c=e.c;return '<div class="tr go hold" data-go="co" data-id="'+c.id+'"><div class=co>'+logo(c)+'<div class=who>'+nm(c,'t1')+'<div class=t2>'+qn(e.qty)+' shares · '+esc(c.ticker)+'</div></div></div><div class=pxc><div class=dsk>'+qn(e.qty)+'</div><div class=capm style="font-weight:700">'+fmt(e.v)+'</div><div class="capm '+(r>=0?'up':'dn')+'" style="font-size:13px">'+(r>=0?'+':'−')+fmt(Math.abs(r))+'</div></div><div>'+fp(c.price)+'</div><div>'+fmt(e.v)+'</div><div class="'+(r>=0?'up':'dn')+'">'+(r>=0?'+':'−')+fmt(Math.abs(r))+'</div><div style="display:flex;justify-content:flex-end">'+spark(c)+'</div></div>'}).join(''):'<div class=lbl style="padding:0 16px 16px">No holdings yet. Pick a company on the Markets tab to buy your first shares.</div>')+'</div>'
+ +'<div class=panel style="padding:0"><div class=hd><h3>Holdings</h3><span class=lbl>'+who(a)+'</span></div>'+(rows.length?'<div class="tr th hold"><div>Company</div><div>Shares</div><div>Price</div><div>Value</div><div>Return</div><div>Chart</div></div>'+rows.map(function(e){var r=e.v-e.cost,c=e.c;return '<div class="tr go hold" data-go="co" data-id="'+c.id+'"><div class=co>'+logo(c)+'<div class=who>'+nm(c,'t1')+'<div class=t2>'+qn(e.qty)+' shares · '+esc(c.ticker)+'</div></div></div><div class=pxc><div class=dsk>'+qn(e.qty)+'</div><div class=capm style="font-weight:700">'+fmt(e.v)+'</div><div class="capm '+(r>=0?'up':'dn')+'" style="font-size:13px">'+(r>=0?'+':'−')+fmt(Math.abs(r))+'</div></div><div>'+fp(c.price)+'</div><div>'+fmt(e.v)+'</div><div class="'+(r>=0?'up':'dn')+'">'+(r>=0?'+':'−')+fmt(Math.abs(r))+'</div><div style="display:flex;justify-content:flex-end">'+spark(c)+'</div></div>'}).join(''):'<div class=lbl style="padding:0 16px 16px">No holdings yet. Pick a company on the Markets tab to buy your first shares.</div>')+'</div>'
  +'<div class=panel><div class=hd><h3>Activity</h3></div>'+(a.txns.length?'<div style="overflow-x:auto"><table><tr><th>Order</th><th>Shares</th><th class=m>Price</th><th>Total</th><th class=m>When</th></tr>'
  +a.txns.map(function(t){return '<tr><td><span class="'+(t.side==='buy'?'up':'dn')+'" style="font-weight:700">'+(t.side==='buy'?'Buy':'Sell')+'</span> '+esc(t.ticker)+'</td><td>'+qn(t.qty)+'</td><td class=m>'+fp(t.price)+'</td><td>'+(t.side==='buy'?'−':'+')+fmt(t.total)+'</td><td class=m>'+new Date(t.t).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+'</td></tr>'}).join('')+'</table></div>':'<div class=lbl style="padding:0 16px 16px">No orders yet.</div>')+'</div></main>';
 }
@@ -911,7 +917,7 @@ function siteHead(){
  var me=db.me;
  var nav=bseNav();
  var account=me
-  ? '<a class=bal href="/portfolio" data-go="acct" title="Money balance">'+coin+'<span class=num>'+fmt(me.cash)+'</span></a><details class=acct><summary>'+(me.avatar?'<img src="'+esc(me.avatar)+'" alt="">':'')+'<span>@'+esc(me.handle)+'</span></summary><div class=acctm><a href="/portfolio" data-go="acct">Portfolio</a><div class=lbl>'+fmt(me.cash)+' Money available</div><a href="/logout">Log out</a></div></details>'
+  ? '<a class=bal href="/portfolio" data-go="acct" title="Money balance">'+coin+'<span class=num>'+fmt(me.cash)+'</span></a><details class=acct><summary>'+(me.avatar?'<img src="'+esc(me.avatar)+'" alt="">':'')+'<span>'+who(me)+'</span></summary><div class=acctm><a href="/portfolio" data-go="acct">Portfolio</a><a href="/account">Account settings</a><div class=lbl>'+fmt(me.cash)+' Money available</div><a href="/logout">Log out</a></div></details>'
   : '<a class="small primary" href="'+esc(signInHref())+'">Sign in</a>';
  return '<header class=bsehead><a class=wordmark href="/" data-go="home" aria-label="'+esc(BSE_SHORT)+'">'+logoImgs()+'<span class=bname>'+esc(BSE_NAME)+'</span></a><nav class=hnav aria-label="Primary">'+nav+'</nav><div class=grow></div>'
   +'<div class=hsearch>'+SEARCH_ICO+'<input id=qtop type=search placeholder="Search tickers" value="'+esc(S.qtop||'')+'" autocomplete=off aria-label="Search tickers"><div id=qsug role="listbox" aria-label="Matching companies"></div></div>'

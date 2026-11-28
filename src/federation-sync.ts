@@ -77,7 +77,7 @@ const POST_COUNTS = ["likes", "reposts", "replies", "quotes", "bookmarks", "view
 
 async function renderUser(id: string) {
 	const [u] = await sql`select id::text, screen_name, name, bio, location, website, avatar_url, banner_url, protected, created_at, verified_type, verified_at, translator, flag, pronouns, parody_label, decoration, org_badge_id::text, ${badgesOf(sql`users.id`)} as badges from users
-		where id = ${id}::bigint and instance is null and status <> 'suspended' and deactivated_at is null`;
+		where id = ${id}::bigint and instance is null and not bse_only and status <> 'suspended' and deactivated_at is null`;
 	if (!u) return { kind: "user", id, gone: true };
 	return {
 		kind: "user",
@@ -216,7 +216,7 @@ export async function federationApi(incoming: Incoming, method: string, path: st
 			}
 		})();
 		if (!STAFF_HANDLE.test(name)) return signedAnswer(incoming, 404, { error: "No such account." });
-		const [u] = await sql`select id::text from users where lower(screen_name) = lower(${name}) and instance is null`;
+		const [u] = await sql`select id::text from users where lower(screen_name) = lower(${name}) and instance is null and not bse_only`;
 		return u ? signedAnswer(incoming, 200, await renderUser(u.id)) : signedAnswer(incoming, 404, { error: "No such account." });
 	}
 	const media = /^\/federation\/v1\/media\/(\d{1,19})(\/poster)?$/.exec(path);

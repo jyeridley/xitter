@@ -106,12 +106,12 @@ export function toUser(r: any): User {
 export const localName = (name: string) => (name.toLowerCase().endsWith(`@${INSTANCE_ID}`) ? name.slice(0, -INSTANCE_ID.length - 1) : name);
 
 export async function userByName(viewerId: string, screenName: string): Promise<User | undefined> {
-	const rows = await sql`select ${userCols(viewerId)} from users u where lower(u.screen_name) = lower(${localName(screenName)}) and not u.instance_blocked`;
+	const rows = await sql`select ${userCols(viewerId)} from users u where lower(u.screen_name) = lower(${localName(screenName)}) and not u.instance_blocked and not u.bse_only`;
 	return rows[0] && toUser(rows[0]);
 }
 
 export async function userById(viewerId: string, id: string): Promise<User | undefined> {
-	const rows = await sql`select ${userCols(viewerId)} from users u where u.id = ${id}::bigint and not u.instance_blocked`;
+	const rows = await sql`select ${userCols(viewerId)} from users u where u.id = ${id}::bigint and not u.instance_blocked and not u.bse_only`;
 	return rows[0] && toUser(rows[0]);
 }
 

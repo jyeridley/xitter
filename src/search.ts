@@ -150,7 +150,7 @@ export async function searchUsers(viewerId: string, query: string, limit: number
 	const cond = each.reduce((acc, c) => sql`${acc} and ${c}`);
 	const first = words[0];
 	const rows = await sql`select u.id from users u where ${cond}
-			and u.status <> 'suspended' and u.id not in ${outOfView(viewerId)} and u.id not in ${blockedFor(viewerId)}
+			and u.status <> 'suspended' and not u.bse_only and u.id not in ${outOfView(viewerId)} and u.id not in ${blockedFor(viewerId)}
 			${viewerId === GUEST_ID ? sql`and not ${hiddenFromGuests(sql`u`)}` : sql``}
 			${namesOtherInstance(query) ? sql`` : sql`and u.id not in ${federatedHiddenFor(viewerId)}`}
 		order by (lower(u.screen_name) = lower(${first})) desc, (u.screen_name ilike ${`${first.replace(/[\\%_]/g, "")}%`}) desc,
