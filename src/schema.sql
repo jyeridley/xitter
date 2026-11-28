@@ -2089,3 +2089,4 @@ alter table users add column if not exists discord_avatar text;
 alter table users add column if not exists discord_linked_at timestamptz;
 alter table users add column if not exists bse_passwordless boolean not null default false;
 create unique index if not exists users_discord_id_key on users (discord_id) where discord_id is not null;
+create index if not exists market_txns_ticker_created on market_txns (ticker, created_at desc);

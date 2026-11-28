@@ -6,6 +6,8 @@
 // market (Postgres); signed out, or with Money off, it's read-only. A port
 // of Jye's one-file tradex.html, whose page script is markets-client.js. The BSE name is on every page people see.
 //
+// Trades move the price (a buy multiplies it up, a sell multiplies it down);
+// the two-second tick is a small wiggle around that, with a rare news shock.
 // Like the election page (election.ts), a browser opening /i/markets gets it
 // inside the client with its side bars (tidy.ts frames /i/markets/embed in the
 // main column); frames, ?embed=1 and link fetchers get the page alone.
@@ -49,9 +51,17 @@ const INDEX = 300; // market-cap points kept
 const LOGS = 300;
 const CATS = ["Markets", "Corporate", "Economy", "Policy", "Major event"];
 const MAX_LOGO = 1_000_000;
-// the walk (see tick): per two-second step, as fractions of the price
-const STEP = 0.0022, PULL = 0.025, FAIR_DRIFT = 0.0007, JUMP_ODDS = 0.012, JUMP = 0.012;
-const MIN_PRICE = 0.0001;
+// the walk (see tick): a small wiggle each two-second step, as a fraction of the price.
+// Trades move the price a lot more (IMPACT_K below); fair value follows them, so this
+// pull does not walk a trade back. Rare news shocks are applied after the wiggle.
+const STEP = 0.0004, PULL = 0.02, FAIR_DRIFT = 0.00015;
+const SHOCK_ODDS = 0.00018; // about one per company every three hours
+const MIN_PRICE = 0.0001, MAX_PRICE = 1e12;
+// a buy or sell: Δln(price) = IMPACT_K × (qty / shares) × (1 + MOMENTUM_PER × other
+// distinct investors on this side in the last 15 minutes), capped at 5× per order.
+// The order fills at the midpoint of the pre- and post-trade price, so buying and
+// selling the same size is a round trip at the same average and prints no profit.
+const IMPACT_K = 2000, MOMENTUM_PER = 0.55, IMPACT_CAP = Math.log(5);
 const SEED = 120; // steps of history a new listing starts with
 
 const esc = (t: string) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -78,20 +88,21 @@ async function tick() {
 	try {
 		// each listed price takes a small random step (log-normal, so a $0.10
 		// stock moves as visibly as a $100 one), pulled gently back towards a fair
-		// value that wanders slowly itself, now and then a bigger jump; prices keep
+		// value that follows trades and wanders only slightly itself; prices keep
 		// six decimals, so no move is rounded away. Volume trickles in, more for
-		// the bigger companies.
+		// the bigger companies. A rare news shock (±10–40% and a headline) is applied after.
 		const moved = await sql`with u as (
 			update market_companies set
-				fair = coalesce(fair, price::float8) * exp(random_normal(0, ${FAIR_DRIFT})),
-				price = greatest(${MIN_PRICE}, round((price::float8 * exp(random_normal(0, ${STEP}) + ${PULL} * ln(coalesce(fair, price::float8) / price::float8)
-					+ case when random() < ${JUMP_ODDS} then random_normal(0, ${JUMP}) else 0 end))::numeric, 6)),
+				fair = least(${MAX_PRICE}, greatest(${MIN_PRICE}, coalesce(fair, price::float8) * exp(random_normal(0, ${FAIR_DRIFT})))),
+				price = greatest(${MIN_PRICE}, least(${MAX_PRICE}, round((price::float8 * exp(random_normal(0, ${STEP}) + ${PULL} * ln(coalesce(fair, price::float8) / price::float8)))::numeric, 6))),
 				volume = volume + floor(power(random(), 2) * greatest(12, shares / 20000.0))::bigint
 			where not suspended returning id, price)
 			insert into market_history (company_id, price) select id, price from u returning company_id`;
-		if (!moved.length) return;
-		await sql`insert into market_index (value) select coalesce(sum(price * shares), 0)::float8 from market_companies`;
-		changed++;
+		if (moved.length) {
+			await sql`insert into market_index (value) select coalesce(sum(price * shares), 0)::float8 from market_companies`;
+			changed++;
+		}
+		await newsShocks();
 		if (++ticks % 30 === 1) await prune();
 	} catch (e) {
 		if (ticks % 300 === 0) console.error("markets tick", e);
@@ -161,6 +172,46 @@ if (process.env.MARKETS_TICK !== "0")
 async function prune() {
 	await sql`delete from market_history h using (select id from (select id, row_number() over (partition by company_id order by id desc) rn from market_history) x where rn > ${HIST}) d where h.id = d.id`;
 	await sql`delete from market_index where id <= (select id from market_index order by id desc offset ${INDEX} limit 1)`;
+}
+
+const clampPrice = (p: number) => {
+	if (!Number.isFinite(p) || p <= MIN_PRICE) return MIN_PRICE;
+	if (p >= MAX_PRICE) return MAX_PRICE;
+	return Number(p.toFixed(6));
+};
+// recentSameSide: other distinct investors who already traded this side in the burst
+function impactOf(side: "buy" | "sell", qty: number, shares: number, price: number, recentSameSide: number): { post: number; fill: number } {
+	const momentum = 1 + MOMENTUM_PER * Math.max(0, recentSameSide);
+	const logMove = Math.min(IMPACT_K * (qty / Math.max(shares, 1)) * momentum, IMPACT_CAP);
+	const post = clampPrice(price * Math.exp((side === "buy" ? 1 : -1) * logMove));
+	return { post, fill: clampPrice((price + post) / 2) };
+}
+
+const SHOCK_UP = [
+	(n: string, t: string, p: number) => `${n} (${t}) jumps ${p}% on a surprise burst of demand`,
+	(n: string, t: string, p: number) => `${n} (${t}) rallies ${p}% after a strong outlook`,
+	(n: string, t: string, p: number) => `${n} (${t}) surges ${p}% on unexpected buying`,
+];
+const SHOCK_DOWN = [
+	(n: string, t: string, p: number) => `${n} (${t}) sinks ${p}% after a sudden wave of selling`,
+	(n: string, t: string, p: number) => `${n} (${t}) drops ${p}% on a weak outlook`,
+	(n: string, t: string, p: number) => `${n} (${t}) slides ${p}% after investors rush for the exit`,
+];
+async function newsShocks() {
+	const rows = (await sql`select id::text, ticker, name, price::float8 from market_companies where not suspended`) as { id: string; ticker: string; name: string; price: number }[];
+	for (const c of rows) {
+		if (Math.random() >= SHOCK_ODDS) continue;
+		const shock = 0.1 + Math.random() * 0.3;
+		const up = Math.random() < 0.5;
+		const price = clampPrice(c.price * (up ? 1 + shock : 1 - shock));
+		const pct = Math.round(shock * 100);
+		const lines = up ? SHOCK_UP : SHOCK_DOWN;
+		const text = lines[Math.floor(Math.random() * lines.length)]!(c.name, c.ticker, pct);
+		await sql`update market_companies set price = ${price}, fair = ${price} where id = ${c.id}`;
+		await sql`insert into market_history (company_id, price) values (${c.id}, ${price})`;
+		await sql`insert into market_headlines (text, cat, ticker, breaking) values (${text}, 'Major event', ${c.ticker}, ${shock >= 0.25})`;
+		changed++;
+	}
 }
 
 async function log(action: string, viewer?: Viewer) {
@@ -330,13 +381,16 @@ async function trade(viewer: Viewer, body: any) {
 	if (me?.status === "restricted") throw new Refusal("Your account can't trade right now.");
 	if (!(await disclaimerAccepted(viewer.id))) throw new Refusal(`Accept the ${coinName()} terms first.`);
 	await sql.begin(async (tx) => {
-		const [c] = await tx`select id::text, ticker, price::float8, suspended from market_companies where id = ${idOf(body?.id)} for update`;
+		const [c] = await tx`select id::text, ticker, price::float8, shares, suspended from market_companies where id = ${idOf(body?.id)} for update`;
 		if (!c) throw new Refusal("Company not found");
 		if (c.suspended) throw new Refusal("This listing is suspended");
+		const recent = await tx`select user_id::text as id from market_txns where ticker = ${c.ticker} and side = ${side} and created_at > now() - interval '15 minutes' and user_id <> ${viewer.id}::bigint`;
+		const sameSide = new Set((recent as { id: string }[]).map((r) => r.id)).size;
+		const { post, fill } = impactOf(side, q, Number(c.shares), c.price, sameSide);
 		await tx`insert into money_wallets (user_id, balance_cents) values (${viewer.id}::bigint, ${economy().starting_cents}) on conflict (user_id) do nothing`;
 		const [w] = await tx`select balance_cents::bigint as cents from money_wallets where user_id = ${viewer.id}::bigint for update`;
-		const cents = Math.round(q * c.price * 100);
-		if (!Number.isSafeInteger(cents)) throw new Refusal("That order is too big");
+		const cents = Math.round(q * fill * 100);
+		if (!Number.isSafeInteger(cents) || cents < 0 || (side === "buy" && cents <= 0)) throw new Refusal("That order is too big");
 		if (side === "buy") {
 			if (cents > Number(w.cents)) throw new Refusal("You don't have enough money for that.");
 			await tx`update money_wallets set balance_cents = balance_cents - ${cents} where user_id = ${viewer.id}::bigint`;
@@ -350,8 +404,9 @@ async function trade(viewer: Viewer, body: any) {
 			else await tx`update market_holdings set qty = qty - ${q}, cost = cost - ${avg * q} where user_id = ${viewer.id} and company_id = ${c.id}`;
 			await tx`update money_wallets set balance_cents = balance_cents + ${cents} where user_id = ${viewer.id}::bigint`;
 		}
-		await tx`update market_companies set volume = volume + ${q} where id = ${c.id}`;
-		await tx`insert into market_txns (user_id, side, ticker, qty, price, total, total_cents) values (${viewer.id}, ${side}, ${c.ticker}, ${q}, ${c.price}, ${cents / 100}, ${cents})`;
+		await tx`update market_companies set volume = volume + ${q}, price = ${post}, fair = ${post} where id = ${c.id}`;
+		await tx`insert into market_history (company_id, price) values (${c.id}, ${post})`;
+		await tx`insert into market_txns (user_id, side, ticker, qty, price, total, total_cents) values (${viewer.id}, ${side}, ${c.ticker}, ${q}, ${fill}, ${cents / 100}, ${cents})`;
 	});
 	changed++;
 }
