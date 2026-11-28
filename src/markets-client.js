@@ -66,6 +66,11 @@ html[data-site=bse] .wordmark .bname{display:none}
 .acctm a:hover{background:var(--band);text-decoration:none}
 .acctm .lbl{padding:4px 10px 8px}
 .bsetag{display:inline-block;padding:0 5px;border:1px solid currentColor;font:700 10px/16px var(--sans);letter-spacing:.03em;vertical-align:1px;color:var(--ink)}
+.adfilt{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 12px 0}
+.adfilt .lbl{margin:0}
+.adfilt button{width:auto;min-height:32px;padding:0 12px;font-size:13px;margin:0;background:#fff;color:var(--ink)}
+.adfilt button.on{background:#000;color:#fff}
+.tag.ok{border-color:var(--up);color:var(--up)}
 .acct summary span{white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis}
 .ppl{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .prow{cursor:pointer;color:var(--txt);text-decoration:none}
@@ -471,7 +476,7 @@ function bootRoute(){
  return {page:Q.get('c')&&Q.get('p')!=='edit'?'co':(PAGES.indexOf(Q.get('p'))>=0?Q.get('p'):'dash'),ticker:Q.get('c')};
 }
 var R=bootRoute();
-var S={page:R.page,cid:null,range:90,ir:150,side:'buy',q:'',find:'',sort:'mcap',dir:-1,sector:'',qtop:''};
+var S={page:R.page,cid:null,range:90,ir:150,side:'buy',q:'',find:'',sort:'mcap',dir:-1,sector:'',qtop:'',coFilter:'',accFilter:''};
 if(R.ticker){var c0=CT(R.ticker);S.cid=c0?c0.id:null}
 var AD=null,EDIT=null,BUSY=false;
 
@@ -527,7 +532,7 @@ var pill=function(x){return '<span class="pill '+(x>=0?'up':'dn')+'">'+(x>=0?ARR
 // a company wears its own logo, else its ticker. The founder's picture is never used as the stock's picture
 var logo=function(c,cls){return c.img?'<img class="logo-img '+(cls||'')+'" src="'+esc(c.img)+'" alt="" data-tk="'+esc(c.ticker.slice(0,4))+'">':'<span class="logo-img '+(cls||'')+'">'+esc(c.ticker.slice(0,4))+'</span>'};
 // its name with the founder's checkmark
-function nm(c,cls){return '<div class="nm '+(cls||'')+'"><span>'+esc(c.name)+'</span>'+badge(c.owner&&c.owner.badge)+'</div>'}
+function nm(c,cls){return '<div class="nm '+(cls||'')+'"><span>'+esc(c.name)+'</span>'+badge(c.verified?'business':'')+'</div>'}
 // a BSE-only account shows its username with a BSE tag, never as an @handle: those are Bloxburg Social's
 function who(a){return '@'+esc(a.handle)+(a.bse?' <span class=bsetag title="BSE account">BSE</span>':'')}
 // someone on a company's page: picture, name, checkmark, @handle; social accounts open their profile
@@ -568,13 +573,13 @@ document.addEventListener('mouseleave',function(){document.querySelectorAll('[da
 function spark(c){var h=c.hist.slice(-30);if(h.length<2)return '<span class=spark></span>';var v=h.map(function(x){return x[1]}),col=v[v.length-1]>=v[0]?'var(--up)':'var(--dn)';return '<svg class=spark viewBox="0 0 72 28" preserveAspectRatio="none"><polyline fill="none" stroke="'+col+'" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" points="'+path(v,72,28,3)+'"/></svg>'}
 function item(c,right){return '<div class=item data-go="co" data-id="'+c.id+'">'+logo(c)+'<div class=who>'+nm(c,'t1')+'<div class=t2>'+esc(c.ticker)+(c.sector?' · '+esc(c.sector):'')+(c.suspended?' · Suspended':'')+'</div></div>'+spark(c)+'<div class=px>'+(right||('<div class="t1 num">'+fp(c.price)+'</div>'+pill(chg(c))))+'</div></div>'}
 var SHIELD='<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="M12 8v4.5M12 16h.01"/></svg>';
-function verified(c){return !!(c&&c.owner&&c.owner.badge)}
+function verified(c){return !!(c&&c.verified)}
 function unvText(){return 'Companies without a checkmark aren\'t officially verified by '+esc(db.instance||'us')+'.'}
 function unvBanner(){return '<div class=unv role=note>'+SHIELD+'<div><b>Unverified company</b><span>'+unvText()+' Do your own research before trading.</span></div></div>'}
-function checkNote(){return '<div class=cknote>'+SHIELD+'<span>A checkmark next to a company means its founder is verified. '+unvText()+(SITE!=='bse'&&B.bse?' <a href="'+esc(B.bse)+'">Open the BSE site</a>':'')+'</span></div>'}
+function checkNote(){return '<div class=cknote>'+SHIELD+'<span>A gold checkmark next to a company means the exchange has verified it. '+unvText()+(SITE!=='bse'&&B.bse?' <a href="'+esc(B.bse)+'">Open the BSE site</a>':'')+'</span></div>'}
 function listCta(){
  if(!db.me||!db.me.canList)return '';
- return '<div class=cta><div><div class=t>List your company</div><div class=lbl style="margin-top:2px">'+(db.admin?'Staff can list any number of companies.':'Any account can list up to '+db.me.ownMax+' companies ('+db.me.owned+' listed).'+(db.me.badge?'':' Without a checkmark, yours show as unverified.'))+'</div></div><button class=primary data-go="new" style="flex:0 0 auto">List a company</button></div>';
+ return '<div class=cta><div><div class=t>List your company</div><div class=lbl style="margin-top:2px">'+(db.admin?'Staff can list any number of companies.':'Any account can list up to '+db.me.ownMax+' companies ('+db.me.owned+' listed). New listings show as unverified until staff verifies them.')+'</div></div><button class=primary data-go="new" style="flex:0 0 auto">List a company</button></div>';
 }
 function emptyMarket(){return '<div class="card empty"><h2>No companies yet</h2><p>Nothing is listed on the market yet. Anyone with an account can list a company'+(db.me&&db.me.canList?' right now.':'.')+'</p>'+(db.me&&db.me.canList?'<button class=primary data-go="new">List a company</button>':'')+'</div>'}
 function moneyBanner(){
@@ -833,7 +838,7 @@ function companyForm(c){
  var sec=(db.sectors||[]).map(function(s){return '<option'+(c&&c.sector===s?' selected':'')+'>'+esc(s)+'</option>'}).join('');
  return '<main><div class="dlg wide"><div class=card style="padding:24px">'
  +'<div class=h2>'+(isNew?'List a company':'Edit '+esc(c.ticker))+'</div><div class=note style="margin-bottom:18px">'+(isNew?'It trades in Money from the moment it\'s listed. '+(db.admin?'':'You\'re shown as its founder.'):'The ticker, share count and price are set by staff.')+'</div>'
- +'<div class=preview>'+'<span id=pv-logo>'+(c?logo(c,'lg'):'<span class="logo-img lg">TICK</span>')+'</span><div style="min-width:0"><div class=nm style="font-weight:800"><span id=pv-name>'+(c?esc(c.name):'Company name')+'</span>'+badge(c&&c.owner&&c.owner.badge)+'</div><div class=lbl id=pv-sub>'+(c?esc(c.ticker)+' · '+esc(c.sector||''):'TICKER · Sector')+'</div></div><div style="margin-left:auto;text-align:right" id=pv-cap>'+(c?'<div class=num style="font-weight:700">'+fp(c.price)+'</div><div class=lbl>'+big(c.price*c.shares)+' cap</div>':'')+'</div></div>'
+ +'<div class=preview>'+'<span id=pv-logo>'+(c?logo(c,'lg'):'<span class="logo-img lg">TICK</span>')+'</span><div style="min-width:0"><div class=nm style="font-weight:800"><span id=pv-name>'+(c?esc(c.name):'Company name')+'</span>'+badge(c&&c.verified?'business':'')+'</div><div class=lbl id=pv-sub>'+(c?esc(c.ticker)+' · '+esc(c.sector||''):'TICKER · Sector')+'</div></div><div style="margin-left:auto;text-align:right" id=pv-cap>'+(c?'<div class=num style="font-weight:700">'+fp(c.price)+'</div><div class=lbl>'+big(c.price*c.shares)+' cap</div>':'')+'</div></div>'
  +'<label class=f><span>Company name<i id=n-name>0/50</i></span><input id=f-name maxlength=50 value="'+(c?esc(c.name):'')+'" placeholder="Bloxburg Burgers"></label>'
  +(isNew?'<div class=row style="gap:12px"><label class=f><span>Ticker</span><input id=f-ticker maxlength=5 placeholder="BURG" style="text-transform:uppercase;font-weight:700;letter-spacing:.05em"></label><label class=f><span>Sector</span><select id=f-sector>'+sec+'</select></label></div>':'<label class=f><span>Sector</span><select id=f-sector>'+sec+'</select></label>')
  +'<label class=f><span>What it does<i id=n-desc>0/200</i></span><textarea id=f-desc maxlength=200 placeholder="Burgers and fries, made fresh on Main Street.">'+(c?esc(c.description||''):'')+'</textarea></label>'
@@ -841,7 +846,7 @@ function companyForm(c){
  +'<label class=f><span>Logo</span><input id=f-logo type=file accept="image/png,image/jpeg,image/gif,image/webp"></label>'
  +(c&&c.logo?'<label class=f style="flex-direction:row;align-items:center;gap:8px;margin-bottom:14px"><input id=f-clear type=checkbox> Remove the current logo</label>':'')
  +'<div class=note style="margin:-6px 0 14px">This is the company\'s picture on the market. It is separate from your profile picture.</div>'
- +(isNew&&!db.admin&&!db.me.badge?'<div class="unv" style="margin:0 0 14px">'+SHIELD+'<div><b>Your company will be listed as unverified</b><span>Your account doesn\'t have a checkmark, so your company won\'t show one. '+unvText()+'</span></div></div>':'')
+ +(isNew&&!db.admin?'<div class="unv" style="margin:0 0 14px">'+SHIELD+'<div><b>Your company will be listed as unverified</b><span>Staff can add the gold checkmark from the admin panel after review. '+unvText()+'</span></div></div>':'')
  +'<div class=err id=f-err></div><div class=row style="gap:8px"><button data-back>Cancel</button><button class=primary id=f-go>'+(isNew?'List company':'Save')+'</button></div></div></div></main>'}
 function formPreview(){var n=$('#f-name');if(!n)return;var t=$('#f-ticker'),p=$('#f-price'),s=$('#f-shares');$('#n-name').textContent=n.value.length+'/50';$('#n-desc').textContent=$('#f-desc').value.length+'/200';$('#pv-name').textContent=n.value||'Company name';
  var tk=t?t.value.toUpperCase().replace(/[^A-Z]/g,''):'';if(t&&t.value!==tk)t.value=tk;if(t)$('#pv-sub').textContent=(tk||'TICKER')+' · '+$('#f-sector').value;
@@ -867,16 +872,16 @@ function adminPage(){
  if(!db.admin)return '<main><div class="card empty"><h2>Staff only</h2><p>The market\'s admin panel is for '+esc(db.instance)+' staff with the admin role.</p></div></main>';
  if(!AD){api('admin').then(function(r){AD=r;render()},function(e){AD={accounts:[],logs:[],error:e.message};render()});return '<main><div class=note>Loading…</div></main>'}
  return '<main class=ad>'+moneyBanner()+'<div class=adgrid>'+adCo()+adCtl()+adEvents()+adHl()
- +'<details class="card full"'+(S.openAcc?' open':'')+' data-d=acc><summary>Investors ('+AD.accounts.length+')</summary><br>'+adAcc()+'</details>'
+ +'<details class="card full"'+(S.openAcc!==false?' open':'')+' data-d=acc><summary>Users ('+AD.accounts.length+')</summary><br>'+adAcc()+'</details>'
  +'<details class="card full"'+(S.openLog?' open':'')+' data-d=log><summary>Activity log</summary><br>'+adLog()+'</details></div></main>'}
 function adCo(){var e=EDIT&&C(EDIT);var sec='<option value="">Sector (optional)</option>'+(db.sectors||[]).map(function(s){return '<option>'+esc(s)+'</option>'}).join('');
  return (e?editForm(e):'')+'<div class=card><h3>List a company</h3><div class=row>'
  +'<input id=cn placeholder="Company name" maxlength=80><input id=ct placeholder="Ticker" maxlength=6><input id=cp type=number step=0.01 min=100 placeholder="Initial price"><input id=cs type=number min=1 placeholder="Shares outstanding"></div>'
  +'<div class=row><select id=csec>'+sec+'</select><input id=cdesc maxlength=200 placeholder="Description (optional)"></div>'
  +'<div class=row><input id=cown maxlength=16 placeholder="Link an account: @username (optional)" autocapitalize=off spellcheck=false><label class=f style="margin:0"><span>Logo</span><input id=cl type=file accept="image/png,image/jpeg,image/gif,image/webp"></label></div>'
- +'<div class=note style="margin:2px 0 10px">The linked account is shown as the founder (name and checkmark). The logo is set separately.</div><div class=row><button class=primary data-a=list>List company</button></div></div>'
- +'<div class="card full" style="padding:0;order:-1"><div style="overflow-x:auto"><table><tr><th>Company</th><th>Price</th><th class=m>Founder</th><th>Status</th><th></th></tr>'
- +(db.companies.map(function(c){return '<tr><td><span style="display:inline-flex;gap:8px;align-items:center">'+logo(c,'sm')+'<b>'+esc(c.ticker)+'</b> <span class="lbl nm" style="display:inline-flex"><span>'+esc(c.name)+'</span>'+badge(c.owner&&c.owner.badge)+'</span></span></td><td>'+fp(c.price)+'</td><td class=m>'+(c.owner?'@'+esc(c.owner.handle):'<span class=lbl>none</span>')+'</td><td>'+(c.suspended?'<span class="tag brk">Suspended</span>':'Active')+'</td><td><button class=small data-a=edCo data-id="'+c.id+'">Edit</button> <button class=small data-a=suspend data-id="'+c.id+'">'+(c.suspended?'Resume':'Suspend')+'</button> <button class="small danger" data-a=remove data-id="'+c.id+'">Delete</button></td></tr>'}).join('')||'<tr><td colspan=5 class=lbl>No companies</td></tr>')+'</table></div></div>'}
+ +'<div class=note style="margin:2px 0 10px">The linked account is shown as the founder. The gold checkmark is set separately with Verify in this list. The logo is set separately.</div><div class=row><button class=primary data-a=list>List company</button></div></div>'
+ +'<div class="card full" style="padding:0;order:-1">'+adFilter('co',db.companies)+'<div style="overflow-x:auto"><table><tr><th>Company</th><th>Price</th><th class=m>Founder</th><th>Status</th><th></th></tr>'
+ +(filterRows(db.companies,S.coFilter,function(c){return !!c.verified}).map(function(c){return '<tr><td><span style="display:inline-flex;gap:8px;align-items:center">'+logo(c,'sm')+'<b>'+esc(c.ticker)+'</b> <span class="lbl nm" style="display:inline-flex"><span>'+esc(c.name)+'</span>'+badge(c.verified?'business':'')+'</span></span></td><td>'+fp(c.price)+'</td><td class=m>'+(c.owner?'@'+esc(c.owner.handle):'<span class=lbl>none</span>')+'</td><td>'+(c.verified?'<span class="tag ok">Verified</span> ':'<span class=lbl>Unverified</span> ')+(c.suspended?'<span class="tag brk">Suspended</span>':'')+'</td><td><button class=small data-a=edCo data-id="'+c.id+'">Edit</button> <button class=small data-a=verifyCo data-id="'+c.id+'" data-on="'+(c.verified?'0':'1')+'">'+(c.verified?'Unverify':'Verify')+'</button> <button class=small data-a=suspend data-id="'+c.id+'">'+(c.suspended?'Resume':'Suspend')+'</button> <button class="small danger" data-a=remove data-id="'+c.id+'">Delete</button></td></tr>'}).join('')||'<tr><td colspan=5 class=lbl>No companies</td></tr>')+'</table></div></div>'}
 function editForm(c){return '<div class="card full" style="border-color:var(--accent);order:-2"><h3>Editing '+esc(c.ticker)+'</h3>'
  +'<div class=row><label class=f><span>Company name</span><input id=en maxlength=80 value="'+esc(c.name)+'"></label><label class=f><span>Ticker</span><input id=et maxlength=6 value="'+esc(c.ticker)+'"></label><label class=f><span>Shares outstanding</span><input id=es type=number min=1 value="'+c.shares+'"></label></div>'
  +'<div class=row style="align-items:flex-end"><label class=f style="margin:0"><span>Linked account <i>blank unlinks it</i></span><input id=eown maxlength=16 placeholder="@username" autocapitalize=off spellcheck=false value="'+(c.owner?'@'+esc(c.owner.handle):'')+'"></label></div><br>'
@@ -903,10 +908,15 @@ function adHl(){return '<div class=card><h3>Headlines</h3><input id=ht placehold
  +'<label class=lbl style="flex:0 0 auto;display:flex;gap:6px;align-items:center"><input type=checkbox id=hb style="width:auto;min-height:0"> BREAKING</label>'
  +'<button class=primary data-a=pubHl>Publish</button></div>'
  +'<div style="overflow-x:auto;margin-top:8px"><table>'+(db.headlines.map(function(h){return '<tr><td style="white-space:normal">'+(h.brk?'<span class="tag brk">BREAKING</span> ':'')+esc(h.text)+'<div class=lbl>'+esc(h.cat)+(h.ticker?' · '+esc(h.ticker):'')+'</div></td><td><button class=small data-a=edHl data-id="'+h.id+'">Edit</button> <button class="small danger" data-a=delHl data-id="'+h.id+'">Delete</button></td></tr>'}).join('')||'<tr><td class=lbl>No headlines</td></tr>')+'</table></div></div>'}
-function adAcc(){var A=AD.accounts;return '<div class=lbl>Everyone who has traded, with their money balance</div><div style="overflow-x:auto"><table><tr><th>Account</th><th>Money</th><th class=m>In shares</th><th class=m>Positions</th><th class=m>First trade</th></tr>'
- +(A.map(function(a){return '<tr><td>@'+esc(a.screen_name)+' <span class=lbl>'+esc(a.name)+'</span></td><td>'+fmt(a.cash)+'</td><td class=m>'+fmt(a.equity)+'</td><td class=m>'+a.positions+'</td><td class=m>'+new Date(a.created).toLocaleDateString()+'</td></tr>'}).join('')||'<tr><td colspan=5 class=lbl>No investors yet</td></tr>')+'</table></div>'}
+function adAcc(){var A=AD.accounts||[];var rows=filterRows(A,S.accFilter,function(a){return !!a.verified});
+ return adFilter('acc',A)+'<div class=lbl>BSE accounts. A checkmark here is only on the exchange; it does not change a Bloxburg Social badge.</div><div style="overflow-x:auto"><table><tr><th>Account</th><th>Status</th><th>Money</th><th class=m>In shares</th><th class=m>Positions</th><th></th></tr>'
+ +(rows.map(function(a){return '<tr><td>@'+esc(a.screen_name)+' <span class=lbl>'+esc(a.name)+'</span>'+badge(a.badge)+'</td><td>'+(a.verified?'<span class="tag ok">Verified</span>':'<span class=lbl>Unverified</span>')+'</td><td>'+fmt(a.cash)+'</td><td class=m>'+fmt(a.equity)+'</td><td class=m>'+a.positions+'</td><td><button class=small data-a=verifyUser data-id="'+esc(a.id)+'" data-on="'+(a.verified?'0':'1')+'">'+(a.verified?'Unverify':'Verify')+'</button></td></tr>'}).join('')||'<tr><td colspan=6 class=lbl>No accounts</td></tr>')+'</table></div>'}
 function adLog(){return (AD.logs.map(function(e){return '<div style="padding:8px 0;border-bottom:1px solid var(--line);font-size:14px"><span class=lbl>'+new Date(e.t).toLocaleString()+'</span> · '+esc(e.a)+'</div>'}).join('')||'<p class=lbl>No activity yet.</p>')}
-var V=function(s){var e=$(s);return e?e.value:''};
+function adFilter(kind,rows){var f=kind==='co'?S.coFilter:S.accFilter;var ver=rows.filter(function(x){return !!x.verified}).length;
+ return '<div class=adfilt><span class=lbl>Filter</span><button type=button data-a=filter'+kind+' data-filter="" class="'+(f?'':'on')+'">All ('+rows.length+')</button><button type=button data-a=filter'+kind+' data-filter=verified class="'+(f==='verified'?'on':'')+'">Verified ('+ver+')</button><button type=button data-a=filter'+kind+' data-filter=unverified class="'+(f==='unverified'?'on':'')+'">Unverified ('+(rows.length-ver)+')</button></div>'}
+function filterRows(rows,f,isOn){if(!f)return rows.slice();return rows.filter(function(x){return f==='verified'?isOn(x):!isOn(x)})}
+var V=function(s){var e=$(s);return e?e.value:'';};
+
 var ADMIN={
  list:function(){var name=V('#cn').trim(),tk=V('#ct').trim().toUpperCase(),price=+V('#cp'),sh=+V('#cs');
   if(!name||!tk||!(price>0)||!(sh>0))return toast('Enter name, ticker, price and shares',true);
@@ -920,6 +930,10 @@ var ADMIN={
   readFile($('#el')).then(function(logo){return act('edit',{id:c.id,name:n,ticker:T,shares:s,logo:logo,owner:V('#eown').trim()}).then(function(){EDIT=null;render()})},function(e){toast(e.message,true)})},
  clearLogo:function(id){act('clearLogo',{id:id})},
  suspend:function(id){act('suspend',{id:id})},
+ verifyCo:function(id,el){var on=el.getAttribute('data-on')==='1';act('verifyCompany',{id:id,on:on},on?null:'Remove the gold checkmark from this company?')},
+ verifyUser:function(id,el){var on=el.getAttribute('data-on')==='1';act('verifyUser',{id:id,on:on},on?null:'Remove this account\'s checkmark on the exchange? It does not change a Bloxburg Social badge.')},
+ filterco:function(_,el){S.coFilter=el.getAttribute('data-filter')||'';render()},
+ filteracc:function(_,el){S.accFilter=el.getAttribute('data-filter')||'';render()},
  remove:function(id){var c=C(id);act('remove',{id:id},'Delete '+c.ticker+'? Everyone\'s shares in it go with it.')},
  mkt:function(_,el){var p=Math.abs(+V('#mp'))*(+el.getAttribute('data-sign'));if(!p)return toast('Enter a percentage',true);act('market',{pct:p},(p>0?'Boost':'Crash')+' all listed companies by '+Math.abs(p)+'%?')},
  coPct:function(_,el){var p=+V('#cgp');if(!V('#cg'))return toast('No company',true);if(!(p>0))return toast('Enter a percentage',true);act('companyPct',{id:V('#cg'),pct:p,dir:+el.getAttribute('data-dir')})},

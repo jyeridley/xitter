@@ -227,19 +227,19 @@ const pfpOf = (url: string | null | undefined): string => {
 };
 // organisations and governments have square pictures across the site, people round ones (model.ts pictureShape)
 const squareBadge = (t: string | null | undefined) => t === "business" || t === "government";
-type Company = { id: string; name: string; ticker: string; logo: string; img: string; sq: boolean; price: number; prevClose: number; shares: number; volume: number; listed: number; suspended: boolean; sector: string; description: string; owner: Owner | null; holders: any[]; holderCount: number; trades: any[]; hist: [number, number][] };
+type Company = { id: string; name: string; ticker: string; logo: string; img: string; sq: boolean; price: number; prevClose: number; shares: number; volume: number; listed: number; suspended: boolean; verified: boolean; sector: string; description: string; owner: Owner | null; holders: any[]; holderCount: number; trades: any[]; hist: [number, number][] };
 type Shared = { companies: Company[]; index: [number, number][]; headlines: any[]; events: any[]; gap: number };
 let cache: { key: number; at: number; value: Promise<Shared> } | undefined;
 
 async function loadShared(): Promise<Shared> {
 	// who holds each company and its latest trades, public on its page: a BSE-only
 	// account shows its linked social account's picture and checkmark
-	const PERSON = sql`u.screen_name as handle, coalesce(nullif(u.bse_name, ''), u.name) as name, u.bse_only, case when u.bse_only then l.verified_type else u.verified_type end as badge,
+	const PERSON = sql`u.screen_name as handle, coalesce(nullif(u.bse_name, ''), u.name) as name, u.bse_only, case when u.bse_verified is true then 'blue' when u.bse_verified is false then null when u.bse_only then l.verified_type else u.verified_type end as badge,
 		coalesce(u.bse_avatar_url, u.discord_avatar, case when u.bse_only then l.avatar_url else u.avatar_url end) as avatar, l.screen_name as link`;
 	const [rows, hist, index, headlines, events, gap, holders, trades] = await Promise.all([
-		sql`select c.id::text, c.name, c.ticker, c.logo_v, c.logo is not null as has_logo, c.price::float8, c.prev_close::float8, c.shares::float8, c.volume::float8, (extract(epoch from c.listed_at) * 1000)::float8 as listed, c.suspended,
+		sql`select c.id::text, c.name, c.ticker, c.logo_v, c.logo is not null as has_logo, c.price::float8, c.prev_close::float8, c.shares::float8, c.volume::float8, (extract(epoch from c.listed_at) * 1000)::float8 as listed, c.suspended, c.verified,
 			coalesce(c.sector, '') as sector, coalesce(c.description, '') as description, u.id::text as owner_id, u.screen_name as owner_handle, coalesce(nullif(u.bse_name, ''), u.name) as owner_name, u.bse_only as owner_bse, l.screen_name as owner_link,
-			case when u.bse_only then l.verified_type else u.verified_type end as owner_badge, coalesce(u.bse_avatar_url, u.discord_avatar, case when u.bse_only then l.avatar_url else u.avatar_url end) as owner_avatar
+			case when u.bse_verified is true then 'blue' when u.bse_verified is false then null when u.bse_only then l.verified_type else u.verified_type end as owner_badge, coalesce(u.bse_avatar_url, u.discord_avatar, case when u.bse_only then l.avatar_url else u.avatar_url end) as owner_avatar
 			from market_companies c left join users u on u.id = c.owner_id and u.status <> 'suspended' and u.deactivated_at is null
 			left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null order by c.id`,
 		sql`select company_id::text as c, (extract(epoch from t) * 1000)::float8 as t, price::float8 as p from (select company_id, t, price, id, row_number() over (partition by company_id order by id desc) rn from market_history) x where rn <= ${HIST_SENT} order by company_id, id`,
@@ -275,7 +275,7 @@ async function loadShared(): Promise<Shared> {
 			// the company's own logo only; the founder's picture sits next to their name, never as the stock
 			return {
 			id: c.id, name: c.name, ticker: c.ticker, logo, img: companyImage(logo), sq: true,
-			price: c.price, prevClose: c.prev_close, shares: c.shares, volume: c.volume, listed: c.listed, suspended: c.suspended,
+			price: c.price, prevClose: c.prev_close, shares: c.shares, volume: c.volume, listed: c.listed, suspended: c.suspended, verified: !!c.verified,
 			sector: c.sector, description: c.description,
 			owner,
 			holders: holdersBy.get(c.id)?.list ?? [],
@@ -304,7 +304,7 @@ function shared(): Promise<Shared> {
 async function account(viewer: Viewer) {
 	const on = moneyOn();
 	const [[u], holdings, txns, [owned]] = await Promise.all([
-		sql`select u.status, coalesce(nullif(u.bse_name, ''), u.name) as name, u.bse_only, case when u.bse_only then l.verified_type else u.verified_type end as verified_type,
+		sql`select u.status, coalesce(nullif(u.bse_name, ''), u.name) as name, u.bse_only, case when u.bse_verified is true then 'blue' when u.bse_verified is false then null when u.bse_only then l.verified_type else u.verified_type end as verified_type,
 			coalesce(u.bse_avatar_url, u.discord_avatar, case when u.bse_only then l.avatar_url else u.avatar_url end) as avatar_url, l.screen_name as link_handle
 			from users u left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null where u.id = ${viewer.id}`,
 		sql`select company_id::text as id, qty, cost from market_holdings where user_id = ${viewer.id}`,
@@ -617,15 +617,44 @@ const ADMIN: Record<string, (b: any, v: Viewer) => Promise<unknown>> = {
 		await sql`delete from market_headlines where id = ${idOf(b.id)}`;
 		await log("DELETED HEADLINE", v);
 	},
+	async verifyCompany(b, v) {
+		const c = await company(b.id);
+		const on = b.on !== false && b.on !== 0 && b.on !== "0";
+		const [r] = await sql`update market_companies set verified = ${on} where id = ${c.id} and verified is distinct from ${on} returning ticker`;
+		if (r) {
+			pictures.clear();
+			await log((on ? "VERIFIED " : "UNVERIFIED ") + c.ticker, v);
+		}
+	},
+	async verifyUser(b, v) {
+		const id = idOf(b.user ?? b.id);
+		const on = b.on !== false && b.on !== 0 && b.on !== "0";
+		const [u] = await sql`select id::text, screen_name, bse_verified from users where id = ${id}::bigint and deactivated_at is null`;
+		if (!u) throw new Refusal("No such account");
+		if (u.bse_verified === on) return;
+		await sql`update users set bse_verified = ${on} where id = ${id}::bigint`;
+		await log((on ? "VERIFIED @" : "UNVERIFIED @") + u.screen_name, v);
+	},
 };
 
 async function adminData() {
 	const [accounts, logs] = await Promise.all([
-		// everyone who has traded, with their money balance
-		sql`select u.screen_name, u.name, coalesce(w.balance_cents, 0)::float8 / 100 as cash, (extract(epoch from i.first) * 1000)::float8 as created,
-			(select count(*)::int from market_holdings h where h.user_id = i.user_id) as positions,
-			(select coalesce(sum(h.qty * c.price::float8), 0)::float8 from market_holdings h join market_companies c on c.id = h.company_id where h.user_id = i.user_id) as equity
-			from (select user_id, min(created_at) as first from market_txns group by user_id) i join users u on u.id = i.user_id left join money_wallets w on w.user_id = i.user_id order by i.first`,
+		// BSE accounts staff can verify: BSE-only users, founders, and anyone who has traded
+		sql`select u.id::text, u.screen_name, coalesce(nullif(u.bse_name, ''), u.name) as name, u.bse_only,
+			case when u.bse_verified is true then 'blue' when u.bse_verified is false then null when u.bse_only then l.verified_type else u.verified_type end as badge,
+			(u.bse_verified is true or (u.bse_verified is null and coalesce(case when u.bse_only then l.verified_type else u.verified_type end, '') <> '')) as verified,
+			coalesce(w.balance_cents, 0)::float8 / 100 as cash, (extract(epoch from coalesce(i.first, u.created_at)) * 1000)::float8 as created,
+			(select count(*)::int from market_holdings h where h.user_id = u.id) as positions,
+			(select coalesce(sum(h.qty * c.price::float8), 0)::float8 from market_holdings h join market_companies c on c.id = h.company_id where h.user_id = u.id) as equity
+			from users u
+			left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null
+			left join money_wallets w on w.user_id = u.id
+			left join (select user_id, min(created_at) as first from market_txns group by user_id) i on i.user_id = u.id
+			where u.deactivated_at is null
+				and (u.bse_only or exists (select 1 from market_txns t where t.user_id = u.id)
+					or exists (select 1 from market_accounts a where a.user_id = u.id)
+					or exists (select 1 from market_companies c where c.owner_id = u.id))
+			order by u.screen_name`,
 		sql`select action as a, (extract(epoch from created_at) * 1000)::float8 as t from market_logs order by id desc limit ${LOGS}`,
 	]);
 	return { accounts, logs };
@@ -796,7 +825,7 @@ function ogSvg(s: Shared, c: Company | undefined, pic: string | null = null, che
 		chart = `<g transform="translate(56 300)"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${col}" stop-opacity=".4"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs><polygon points="0,${H} ${line} ${W},${H}" fill="url(#g)"/><polyline fill="none" stroke="${col}" stroke-width="4" stroke-linejoin="round" points="${line}"/></g>`;
 	}
 	const head = c ? `${esc(c.ticker)}` : "Total market cap";
-	// a company's card wears its picture (round for people, rounded-square for organisations) and its founder's checkmark
+	// a company's card wears its own picture and, when staff have verified it, the gold tick
 	const tx = c ? 160 : 56;
 	let face = "";
 	if (c) {
@@ -804,7 +833,7 @@ function ogSvg(s: Shared, c: Company | undefined, pic: string | null = null, che
 		face = pic
 			? `<defs><clipPath id="pf">${shape}</clipPath></defs><rect x="56" y="94" width="84" height="84" fill="#f3f3f3" clip-path="url(#pf)"/><image x="56" y="94" width="84" height="84" preserveAspectRatio="xMidYMid slice" clip-path="url(#pf)" href="${pic}"/>`
 			: `<g fill="#f3f3f3">${shape}</g><text x="98" y="145" font-size="22" font-weight="800" fill="#5b5b5b" text-anchor="middle">${esc(c.ticker.slice(0, 4))}</text>`;
-		const b = badgeSvg(c.owner?.badge), bx = (tx + capWidth(c.ticker, 34) + 8).toFixed(0);
+		const b = badgeSvg(c.verified ? "business" : null), bx = (tx + capWidth(c.ticker, 34) + 8).toFixed(0);
 		if (check) face += `<image x="${bx}" y="99" width="36" height="36" href="${check}"/>`;
 		else if (b) face += `<g transform="translate(${(tx + capWidth(c.ticker, 34) + 8).toFixed(0)} 101) scale(1.55)">${b}</g>`;
 	}
@@ -826,10 +855,10 @@ const pictures = new Map<string, Promise<Buffer>>();
 async function ogImage(ticker: string | null, origin: string = PUBLIC_ORIGIN): Promise<Buffer> {
 	const s = await shared();
 	const c = companyBy(s, ticker);
-	const key = `logoonly:${c?.ticker ?? ""}:${origin}:${Math.floor(Date.now() / 60000)}`;
+	const key = `logoonly:${c?.ticker ?? ""}:${c?.verified ? "v" : "u"}:${origin}:${Math.floor(Date.now() / 60000)}`;
 	let p = pictures.get(key);
 	if (!p) {
-		p = Promise.all([ogPicture(c), checkArt(c?.owner?.badge)]).then(([pic, check]) => png(ogSvg(s, c, pic, check, origin)));
+		p = Promise.all([ogPicture(c), checkArt(c?.verified ? "business" : null)]).then(([pic, check]) => png(ogSvg(s, c, pic, check, origin)));
 		pictures.set(key, p);
 		p.catch(() => pictures.delete(key));
 		if (pictures.size > 30) pictures.delete(pictures.keys().next().value!);
@@ -901,7 +930,7 @@ function exportSvg(c: Company, range: number, label: string, pic: string | null,
 	const tx = ax + as + 20;
 	const name = fitText(c.name, 34, W - 48 - Math.max(textWidth(fmtP(c.price), 50), 300) - tx - 70);
 	const nx = tx + textWidth(name, 34) + 10;
-	const b = badgeSvg(c.owner?.badge);
+	const b = badgeSvg(c.verified ? "business" : null);
 	const mark = check ? `<image x="${nx.toFixed(0)}" y="${ay + 6}" width="34" height="34" href="${check}"/>` : b ? `<g transform="translate(${nx.toFixed(0)} ${ay + 8}) scale(1.45)">${b}</g>` : "";
 	const sub = `${esc(c.ticker)}${c.sector ? ` · ${esc(c.sector)}` : ""}${c.suspended ? " · SUSPENDED" : ""}`;
 	// the price and how it moved, top right
@@ -942,10 +971,10 @@ async function exportImage(ticker: string | null, r: string | null, origin: stri
 	const c = companyBy(s, ticker);
 	if (!c) return null;
 	const [range, label] = RANGES[r ?? ""] ?? RANGES["90"];
-	const key = `logoonly:${c.ticker}:${range}:${origin}:${Math.floor(Date.now() / 15000)}`;
+	const key = `logoonly:${c.ticker}:${c.verified ? "v" : "u"}:${range}:${origin}:${Math.floor(Date.now() / 15000)}`;
 	let p = exports_.get(key);
 	if (!p) {
-		p = Promise.all([exportPicture(c), checkArt(c.owner?.badge)]).then(([pic, check]) => png(exportSvg(c, range, label, pic, check, origin)));
+		p = Promise.all([exportPicture(c), checkArt(c.verified ? "business" : null)]).then(([pic, check]) => png(exportSvg(c, range, label, pic, check, origin)));
 		exports_.set(key, p);
 		p.catch(() => exports_.delete(key));
 		if (exports_.size > 20) exports_.delete(exports_.keys().next().value!);
@@ -1225,7 +1254,7 @@ const AUTH_NAV = `<nav class="hnav" aria-label="Primary"><a href="/markets">List
 async function accountMe(viewer: Viewer): Promise<{ name: string; avatar: string; sq: boolean }> {
 	const [u] = await sql`select coalesce(nullif(u.bse_name, ''), u.name) as name,
 		coalesce(u.bse_avatar_url, u.discord_avatar, case when u.bse_only then l.avatar_url else u.avatar_url end) as avatar_url,
-		case when u.bse_only then l.verified_type else u.verified_type end as badge
+		case when u.bse_verified is true then 'blue' when u.bse_verified is false then null when u.bse_only then l.verified_type else u.verified_type end as badge
 		from users u left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null
 		where u.id = ${viewer.id}::bigint`;
 	return { name: u?.name ?? viewer.screen_name, avatar: pfpOf(u?.avatar_url), sq: squareBadge(u?.badge) };

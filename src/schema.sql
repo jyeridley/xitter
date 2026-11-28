@@ -2153,3 +2153,24 @@ alter table users add column if not exists bse_name text;
 alter table bse_apps add column if not exists logo bytea;
 alter table bse_apps add column if not exists logo_type text;
 alter table bse_apps add column if not exists logo_v int not null default 0;
+
+-- BSE staff can verify a company (the gold tick on its page and share card)
+-- independently of the founder's account. Seeded once from the previous rule
+-- (a checkmarked founder made the company look verified) so nobody's current
+-- status changes.
+alter table market_companies add column if not exists verified boolean not null default false;
+do $$ begin
+	if not exists (select 1 from schema_steps where name = 'market_companies_verified') then
+		update market_companies c
+		set verified = true
+		from users u
+		left join users l on l.id = u.bse_link_id and l.status <> 'suspended' and l.deactivated_at is null
+		where c.owner_id = u.id
+			and coalesce(case when u.bse_only then l.verified_type else u.verified_type end, '') <> '';
+		insert into schema_steps (name) values ('market_companies_verified');
+	end if;
+end $$;
+-- a BSE-only check for a person: staff can verify or unverify them on the
+-- exchange without writing users.verified_type (the social badge). null
+-- inherits the current social or linked badge, so existing ticks stay put.
+alter table users add column if not exists bse_verified boolean;
