@@ -543,19 +543,24 @@ async function adminData() {
 
 let client: { js: string; css: string } | undefined;
 const BSE_PUBLIC = join(import.meta.dir, "..", "public");
-const BSE_LOGO_LIGHT = readFileSync(join(BSE_PUBLIC, "bse-logo-light.svg"), "utf8")
-	.replace(/<svg[^>]*>/, "")
-	.replace(/<\/svg>\s*$/, "")
-	.replace(/<title>[^<]*<\/title>/, "")
-	.trim();
+function logoInner(file: string): string {
+	return readFileSync(join(BSE_PUBLIC, file), "utf8")
+		.replace(/<svg[^>]*>/, "")
+		.replace(/<\/svg>\s*$/, "")
+		.replace(/<title>[^<]*<\/title>/, "")
+		.trim();
+}
+const BSE_LOGO_LIGHT = logoInner("bse-logo-light.svg");
+const BSE_LOGO_DARK = logoInner("bse-logo.svg");
 const BSE_ICONS = `<link rel="icon" type="image/svg+xml" href="/public/bse-favicon.svg">
-<link rel="icon" type="image/png" sizes="32x32" href="/public/bse-favicon.png">
-<link rel="icon" type="image/png" sizes="48x48" href="/public/bse-favicon-48.png">
-<link rel="apple-touch-icon" href="/public/bse-apple-touch.png">`;
+<link rel="icon" type="image/png" sizes="16x16" href="/public/bse-favicon-16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/public/bse-favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/public/bse-icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/public/bse-apple-touch.png">`;
 const BSE_WORDMARK = `<span class="logo-wrap" aria-hidden="true"><img class="logo logo-on-dark" src="/public/bse-logo-light.svg" alt=""><img class="logo logo-on-light" src="/public/bse-logo.svg" alt=""></span>`;
-function bseLogoMark(x: number, y: number, height: number): string {
+function bseLogoMark(x: number, y: number, height: number, light = false): string {
 	const scale = height / 723;
-	return `<g transform="translate(${x} ${y}) scale(${scale.toFixed(5)})">${BSE_LOGO_LIGHT}</g>`;
+	return `<g transform="translate(${x} ${y}) scale(${scale.toFixed(5)})">${light ? BSE_LOGO_LIGHT : BSE_LOGO_DARK}</g>`;
 }
 function bsePublicFile(name: string, type: string): Response {
 	return new Response(Bun.file(join(BSE_PUBLIC, name)), { headers: { "content-type": type, "cache-control": "public, max-age=86400", "x-content-type-options": "nosniff" } });
@@ -628,12 +633,12 @@ async function page(req: Request, viewer: Viewer | undefined, opts: { standalone
 	}).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
 	const docTitle = co ? `${co.ticker} · ${co.name} · ${BSE_SHORT}` : standalone ? BSE_NAME : `${BSE_SHORT} · ${inst}`;
 	const html = `<!DOCTYPE html>
-<html lang="en"${standalone ? ' data-site="bse"' : ""}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<html lang="en" data-theme="light"${standalone ? ' data-site="bse"' : ""}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${esc(docTitle)}</title>
 <link rel="canonical" href="${esc(canonical)}">
 ${head}
 ${standalone ? BSE_ICONS : ""}
-<meta name="theme-color" content="#000000">
+<meta name="theme-color" content="#ffffff">
 <style>${f.css}</style></head>
 <body><div id="app"></div>
 <script>window.TRADEX=${boot};</script>
@@ -694,7 +699,7 @@ function ogSvg(s: Shared, c: Company | undefined, pic: string | null = null, che
 	const values = c ? c.hist.map((h) => h[1]) : s.index.map((x) => x[1]);
 	const change = c ? pct(c.price, c.prevClose) : pct(mc, base);
 	const up = change >= 0;
-	const col = (values.length > 1 ? values[values.length - 1] >= values[0] : up) ? "#22c55e" : "#ef4444";
+	const col = (values.length > 1 ? values[values.length - 1] >= values[0] : up) ? "#118a4e" : "#c62828";
 	let chart = "";
 	if (values.length > 1) {
 		const mn = Math.min(...values), mx = Math.max(...values), r = mx - mn || 1, W = 1088, H = 250;
@@ -708,24 +713,25 @@ function ogSvg(s: Shared, c: Company | undefined, pic: string | null = null, che
 	if (c) {
 		const shape = c.sq ? `<rect x="56" y="94" width="84" height="84" rx="18"/>` : `<circle cx="98" cy="136" r="42"/>`;
 		face = pic
-			? `<defs><clipPath id="pf">${shape}</clipPath></defs><rect x="56" y="94" width="84" height="84" fill="#202327" clip-path="url(#pf)"/><image x="56" y="94" width="84" height="84" preserveAspectRatio="xMidYMid slice" clip-path="url(#pf)" href="${pic}"/>`
-			: `<g fill="#202327">${shape}</g><text x="98" y="145" font-size="22" font-weight="800" fill="#8b98a5" text-anchor="middle">${esc(c.ticker.slice(0, 4))}</text>`;
+			? `<defs><clipPath id="pf">${shape}</clipPath></defs><rect x="56" y="94" width="84" height="84" fill="#f3f3f3" clip-path="url(#pf)"/><image x="56" y="94" width="84" height="84" preserveAspectRatio="xMidYMid slice" clip-path="url(#pf)" href="${pic}"/>`
+			: `<g fill="#f3f3f3">${shape}</g><text x="98" y="145" font-size="22" font-weight="800" fill="#5b5b5b" text-anchor="middle">${esc(c.ticker.slice(0, 4))}</text>`;
 		const b = badgeSvg(c.owner?.badge), bx = (tx + capWidth(c.ticker, 34) + 8).toFixed(0);
 		if (check) face += `<image x="${bx}" y="99" width="36" height="36" href="${check}"/>`;
 		else if (b) face += `<g transform="translate(${(tx + capWidth(c.ticker, 34) + 8).toFixed(0)} 101) scale(1.55)">${b}</g>`;
 	}
 	const sub = c ? esc(c.name) + (c.sector ? ` · ${esc(c.sector)}` : "") + (c.owner ? ` · @${esc(c.owner.handle)}` : "") + (c.suspended ? " · SUSPENDED" : "") : all.length ? `${all.length} listed compan${all.length === 1 ? "y" : "ies"}` : "No companies listed yet";
 	const value = c ? fmtP(c.price) : big(mc);
-	const pill = all.length ? `<rect x="56" y="${c ? 244 : 232}" width="170" height="44" rx="22" fill="${up ? "#1d3a2a" : "#3a1d1d"}"/><text x="141" y="${c ? 275 : 263}" font-size="24" font-weight="700" text-anchor="middle" fill="${up ? "#4ade80" : "#f87171"}">${up ? "▲" : "▼"} ${Math.abs(change).toFixed(2)}%</text>` : "";
+	const pill = all.length ? `<text x="56" y="${c ? 275 : 263}" font-size="24" font-weight="700" fill="${up ? "#118a4e" : "#c62828"}">${up ? "▲" : "▼"} ${Math.abs(change).toFixed(2)}%</text>` : "";
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="${FONT}">
-<rect width="1200" height="630" fill="#000"/>
-${bseLogoMark(56, 28, 34)}
-<text x="1144" y="70" font-size="22" fill="#71767b" text-anchor="end">${esc(BSE_NAME)}</text>
-${face}<text x="${tx}" y="${c ? 128 : 132}" font-size="34" font-weight="700" fill="#e7e9ea">${head}</text>
-<text x="${tx}" y="${c ? 166 : 168}" font-size="24" fill="#71767b">${sub}</text>
-<text x="56" y="${c ? 232 : 222}" font-size="52" font-weight="800" fill="#ffffff">${value}</text>
+<rect width="1200" height="630" fill="#ffffff"/>
+<rect width="1200" height="10" fill="#7bcdee"/>
+${bseLogoMark(56, 36, 34)}
+<text x="1144" y="78" font-size="22" fill="#5b5b5b" text-anchor="end">${esc(BSE_NAME)}</text>
+${face}<text x="${tx}" y="${c ? 128 : 132}" font-size="34" font-weight="700" fill="#000000">${head}</text>
+<text x="${tx}" y="${c ? 166 : 168}" font-size="24" fill="#5b5b5b">${sub}</text>
+<text x="56" y="${c ? 232 : 222}" font-size="52" font-weight="800" fill="#000000">${value}</text>
 ${pill}${chart}
-<text x="1144" y="610" font-size="20" fill="#71767b" text-anchor="end">${esc(ogFoot(c?.ticker ?? null, origin))}</text>
+<text x="1144" y="610" font-size="20" fill="#5b5b5b" text-anchor="end">${esc(ogFoot(c?.ticker ?? null, origin))}</text>
 </svg>`;
 }
 const pictures = new Map<string, Promise<Buffer>>();
@@ -792,7 +798,7 @@ function exportSvg(c: Company, range: number, label: string, pic: string | null,
 	const values = hist.length ? hist : [c.price];
 	const change = pct(c.price, c.prevClose), up = change >= 0;
 	const lo = Math.min(...values), hi = Math.max(...values);
-	const col = (values.length > 1 ? values[values.length - 1] >= values[0] : up) ? "#22c55e" : "#ef4444";
+	const col = (values.length > 1 ? values[values.length - 1] >= values[0] : up) ? "#118a4e" : "#c62828";
 	// the chart
 	const cx = 48, cy = 250, cw = W - 96, ch = 250;
 	let chart = "";
@@ -800,19 +806,19 @@ function exportSvg(c: Company, range: number, label: string, pic: string | null,
 		const r = hi - lo || 1;
 		const pts = values.map((y, i): [number, number] => [cx + (i / (values.length - 1)) * cw, cy + 10 + (1 - (y - lo) / r) * (ch - 20)]);
 		const d = smoothPath(pts);
-		const grid = [0, 1, 2, 3].map((k) => `<line x1="${cx}" x2="${cx + cw}" y1="${(cy + (k * ch) / 3).toFixed(1)}" y2="${(cy + (k * ch) / 3).toFixed(1)}" stroke="#1f2327" stroke-width="1"/>`).join("");
+		const grid = [0, 1, 2, 3].map((k) => `<line x1="${cx}" x2="${cx + cw}" y1="${(cy + (k * ch) / 3).toFixed(1)}" y2="${(cy + (k * ch) / 3).toFixed(1)}" stroke="#d9d9d9" stroke-width="1"/>`).join("");
 		const last = pts[pts.length - 1];
 		chart = `${grid}<defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${col}" stop-opacity=".35"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>`
 			+ `<path d="${d} L${(cx + cw).toFixed(1)},${cy + ch} L${cx},${cy + ch} Z" fill="url(#fill)"/>`
 			+ `<path d="${d}" fill="none" stroke="${col}" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>`
 			+ `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="7" fill="${col}" fill-opacity=".25"/><circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="4" fill="${col}"/>`;
-	} else chart = `<text x="${W / 2}" y="${cy + ch / 2}" font-size="22" fill="#71767b" text-anchor="middle">No trading history yet</text>`;
+	} else chart = `<text x="${W / 2}" y="${cy + ch / 2}" font-size="22" fill="#5b5b5b" text-anchor="middle">No trading history yet</text>`;
 	// the face: rounded square for organisations, circle for people, the ticker when there's no picture
 	const ax = 48, ay = 44, as = 88;
 	const shape = c.sq ? `<rect x="${ax}" y="${ay}" width="${as}" height="${as}" rx="20"/>` : `<circle cx="${ax + as / 2}" cy="${ay + as / 2}" r="${as / 2}"/>`;
 	const face = pic
-		? `<defs><clipPath id="pf">${shape}</clipPath></defs><rect x="${ax}" y="${ay}" width="${as}" height="${as}" fill="#202327" clip-path="url(#pf)"/><image x="${ax}" y="${ay}" width="${as}" height="${as}" preserveAspectRatio="xMidYMid slice" clip-path="url(#pf)" href="${pic}"/>`
-		: `<g fill="#202327">${shape}</g><text x="${ax + as / 2}" y="${ay + as / 2 + 8}" font-size="22" font-weight="800" fill="#8b98a5" text-anchor="middle">${esc(c.ticker.slice(0, 4))}</text>`;
+		? `<defs><clipPath id="pf">${shape}</clipPath></defs><rect x="${ax}" y="${ay}" width="${as}" height="${as}" fill="#f3f3f3" clip-path="url(#pf)"/><image x="${ax}" y="${ay}" width="${as}" height="${as}" preserveAspectRatio="xMidYMid slice" clip-path="url(#pf)" href="${pic}"/>`
+		: `<g fill="#f3f3f3">${shape}</g><text x="${ax + as / 2}" y="${ay + as / 2 + 8}" font-size="22" font-weight="800" fill="#5b5b5b" text-anchor="middle">${esc(c.ticker.slice(0, 4))}</text>`;
 	const tx = ax + as + 20;
 	const name = fitText(c.name, 34, W - 48 - Math.max(textWidth(fmtP(c.price), 50), 300) - tx - 70);
 	const nx = tx + textWidth(name, 34) + 10;
@@ -821,22 +827,23 @@ function exportSvg(c: Company, range: number, label: string, pic: string | null,
 	const sub = `${esc(c.ticker)}${c.sector ? ` · ${esc(c.sector)}` : ""}${c.suspended ? " · SUSPENDED" : ""}`;
 	// the price and how it moved, top right
 	const pillText = `${up ? "▲" : "▼"} ${Math.abs(change).toFixed(2)}%`, pw = 40 + pillText.length * 14;
-	const price = `<text x="${W - 48}" y="${ay + 50}" font-size="50" font-weight="800" fill="#ffffff" text-anchor="end">${fmtP(c.price)}</text>`
-		+ `<rect x="${W - 48 - pw}" y="${ay + 66}" width="${pw}" height="38" rx="19" fill="${up ? "#123524" : "#3a1616"}"/><text x="${W - 48 - pw / 2}" y="${ay + 92}" font-size="21" font-weight="700" fill="${up ? "#4ade80" : "#f87171"}" text-anchor="middle">${pillText}</text>`
-		+ `<text x="${W - 60 - pw}" y="${ay + 92}" font-size="18" fill="#71767b" text-anchor="end">since listing</text>`;
-	const tag = `<rect x="48" y="${cy - 52}" width="64" height="30" rx="15" fill="#16181c" stroke="#2f3336"/><text x="80" y="${cy - 31}" font-size="16" font-weight="700" fill="#e7e9ea" text-anchor="middle">${label}</text>`
-		+ `<text x="124" y="${cy - 31}" font-size="16" fill="#71767b">Price history</text>`;
+	const price = `<text x="${W - 48}" y="${ay + 50}" font-size="50" font-weight="800" fill="#000000" text-anchor="end">${fmtP(c.price)}</text>`
+		+ `<text x="${W - 48}" y="${ay + 92}" font-size="21" font-weight="700" fill="${up ? "#118a4e" : "#c62828"}" text-anchor="end">${pillText}</text>`
+		+ `<text x="${W - 48}" y="${ay + 114}" font-size="16" fill="#5b5b5b" text-anchor="end">since listing</text>`;
+	const tag = `<rect x="48" y="${cy - 52}" width="64" height="30" rx="0" fill="#000"/><text x="80" y="${cy - 31}" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">${label}</text>`
+		+ `<text x="124" y="${cy - 31}" font-size="16" fill="#5b5b5b">Price history</text>`;
 	// the key numbers
 	const stats: [string, string][] = [["Market cap", big(c.price * c.shares)], ["Volume", Math.round(c.volume).toLocaleString("en-US")], [`Range (${label})`, `${fmtP(lo)} – ${fmtP(hi)}`], ["Shares", Math.round(c.shares).toLocaleString("en-US")]];
 	const sy = cy + ch + 22, colW = (W - 96) / 4;
-	const row = `<rect x="48" y="${sy}" width="${W - 96}" height="76" rx="16" fill="#0e1012" stroke="#1f2327"/>`
-		+ stats.map(([k, v], i) => `<text x="${72 + i * colW}" y="${sy + 30}" font-size="16" fill="#71767b">${esc(k)}</text><text x="${72 + i * colW}" y="${sy + 58}" font-size="22" font-weight="700" fill="#e7e9ea">${esc(fitText(v, 22, colW - 30))}</text>`).join("");
+	const row = `<rect x="48" y="${sy}" width="${W - 96}" height="76" rx="0" fill="#fff" stroke="#000"/>`
+		+ stats.map(([k, v], i) => `<text x="${72 + i * colW}" y="${sy + 30}" font-size="16" fill="#5b5b5b">${esc(k)}</text><text x="${72 + i * colW}" y="${sy + 58}" font-size="22" font-weight="700" fill="#000000">${esc(fitText(v, 22, colW - 30))}</text>`).join("");
 	const foot = `${bseLogoMark(48, H - 38, 20)}`
-		+ `<text x="${W - 48}" y="${H - 22}" font-size="17" fill="#71767b" text-anchor="end">${esc(new URL(origin).host)}</text>`;
+		+ `<text x="${W - 48}" y="${H - 22}" font-size="17" fill="#5b5b5b" text-anchor="end">${esc(new URL(origin).host)}</text>`;
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="${W * S}" height="${H * S}" viewBox="0 0 ${W} ${H}" font-family="${FONT}">
-<rect width="${W}" height="${H}" fill="#000"/>
-${face}<text x="${tx}" y="${ay + 36}" font-size="34" font-weight="700" fill="#e7e9ea">${esc(name)}</text>${mark}
-<text x="${tx}" y="${ay + 72}" font-size="22" fill="#71767b">${sub}</text>
+<rect width="${W}" height="${H}" fill="#ffffff"/>
+<rect width="${W}" height="8" fill="#7bcdee"/>
+${face}<text x="${tx}" y="${ay + 36}" font-size="34" font-weight="700" fill="#000000">${esc(name)}</text>${mark}
+<text x="${tx}" y="${ay + 72}" font-size="22" fill="#5b5b5b">${sub}</text>
 ${price}${tag}${chart}${row}${foot}
 </svg>`;
 }
@@ -943,7 +950,7 @@ function signedInOn(session: { token: string; csrf: string; userId: string }, lo
 }
 function oauthErrorPage(message: string, next: string): Response {
 	const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · ${esc(BSE_SHORT)}</title>
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#000;color:#e7e9ea;font:15px system-ui,sans-serif}main{width:min(520px,calc(100vw - 32px))}h1{font-size:28px}a{color:#1d9bf0}p{color:#71767b}</style></head>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#fff;color:#1a1a1a;font:16px Inter,Helvetica Neue,Arial,sans-serif}main{width:min(520px,calc(100vw - 32px))}h1{font-size:28px;letter-spacing:-.025em}a{color:#0a4a73}p{color:#5b5b5b}</style></head>
 <body><main><h1>Couldn't sign in</h1><p>${esc(message)}</p><p><a href="/login?next=${encodeURIComponent(next)}">Try again</a> · <a href="/">${esc(BSE_NAME)}</a></p></main></body></html>`;
 	return new Response(html, { status: 400, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
@@ -954,7 +961,7 @@ function sparkline(hist: [number, number][], up: boolean): string {
 	const min = Math.min(...ys), max = Math.max(...ys), span = max - min || 1;
 	const w = 64, h = 22;
 	const d = pts.map((p, i) => `${((i / (pts.length - 1)) * w).toFixed(1)},${(h - ((p[1] - min) / span) * (h - 2) - 1).toFixed(1)}`).join(" ");
-	return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true"><polyline fill="none" stroke="${up ? "#00ba7c" : "#f4212e"}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" points="${d}"/></svg>`;
+	return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true"><polyline fill="none" stroke="${up ? "#118a4e" : "#c62828"}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" points="${d}"/></svg>`;
 }
 async function marketTape(): Promise<string> {
 	const rows = (await shared()).companies.filter((c) => !c.suspended).sort((a, b) => b.price * b.shares - a.price * a.shares).slice(0, 10);
@@ -963,10 +970,10 @@ async function marketTape(): Promise<string> {
 		.map((c) => {
 			const ch = pct(c.price, c.prevClose);
 			const up = ch >= 0;
-			return `<a class="chip" href="/c/${esc(c.ticker)}"><b>${esc(c.ticker)}</b><span class="num">${esc(fmtP(c.price))}</span><span class="chg ${up ? "up" : "dn"}">${esc(sg(ch))}</span>${sparkline(c.hist, up)}</a>`;
+			return `<a class="chip" href="/c/${esc(c.ticker)}"><span class="nm">${esc(c.name)}</span><span>${esc(c.ticker)}</span><span class="mono">${esc(fmtP(c.price))}</span><span class="${up ? "u" : "d"}">${up ? "▲" : "▼"} ${Math.abs(ch).toFixed(2)}%</span></a>`;
 		})
 		.join("");
-	return `<div class="tape" aria-label="Live market prices"><div class="track">${chips}${chips}</div></div>`;
+	return `<div class="tape" aria-label="Live market prices"><div class="tick-row"><div class="tick-mkt">BSE<svg viewBox="0 0 12 8" aria-hidden="true"><path d="M1 2l5 5 5-5"/></svg></div><div class="lane"><div class="track">${chips}${chips}</div></div></div></div>`;
 }
 
 const LOGIN_CSRF_COOKIE = `${SECURE ? "__Host-" : ""}bse_login`;
@@ -989,54 +996,58 @@ function validLoginPost(req: Request, csrf: string): boolean {
 	return isOwnOrigin(req.headers.get("origin")) && req.headers.get("origin") === requestOrigin(req) && sameCsrf(parseCookie(req, LOGIN_CSRF_COOKIE) ?? "", csrf);
 }
 
-const LOGIN_CSS = `:root{--bg:#07090c;--elev:#0e1116;--card:#12151c;--line:rgba(255,255,255,.08);--txt:#f4f6f8;--mut:#8e96a3;--hover:rgba(255,255,255,.045);--up:#16c784;--dn:#ea3943;--accent:#3b82f6;--btn:#f4f6f8;--btntxt:#07090c;--field:#0b0d12;--shadow:0 10px 32px rgba(0,0,0,.38);--radius:16px;color-scheme:dark}
-html[data-theme=light]{--bg:#f3f5f8;--elev:#fff;--card:#fff;--line:#e6e8ee;--txt:#0c1222;--mut:#5c6573;--hover:rgba(15,20,25,.04);--accent:#2563eb;--btn:#0c1222;--btntxt:#fff;--field:#fff;--shadow:0 10px 30px rgba(15,23,42,.08);color-scheme:light}
-html[data-theme=light] .card,html[data-theme=light] .chip{border-color:var(--line)}
-html[data-theme=light] input{border-color:#d5d9e0}
+const LOGIN_CSS = `@font-face{font-family:"Inter";font-style:normal;font-weight:100 900;font-display:swap;src:url("/public/fonts/inter.woff2") format("woff2")}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:400;font-display:swap;src:url("/public/fonts/ibm-plex-mono-400.woff2") format("woff2")}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:500;font-display:swap;src:url("/public/fonts/ibm-plex-mono-500.woff2") format("woff2")}
+:root{--ink:#000;--txt:#1a1a1a;--mut:#5b5b5b;--bg:#fff;--elev:#fff;--card:#fff;--line:#d9d9d9;--band:#f3f3f3;--hover:rgba(0,0,0,.04);--up:#118a4e;--dn:#c62828;--accent:#7bcdee;--deep:#0a4a73;--btn:#000;--btntxt:#fff;--field:#fff;--sans:"Inter","Helvetica Neue",Arial,sans-serif;--mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;color-scheme:light}
 *{box-sizing:border-box}
-html,body{margin:0;min-height:100%;background:var(--bg);color:var(--txt);font:15px/1.45 ui-sans-serif,"Segoe UI",system-ui,-apple-system,Inter,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
-a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
-a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.num{font-variant-numeric:tabular-nums}
-.bsehead{display:flex;align-items:center;gap:12px;padding:0 20px;min-height:60px;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:8;background:color-mix(in srgb,var(--bg) 86%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
-.wordmark{display:flex;align-items:center;gap:12px;color:var(--txt);text-decoration:none;font-weight:800}
+html,body{margin:0;min-height:100%;background:#fff;color:var(--txt);font:400 16px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+a{color:var(--deep);text-decoration:none}a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.num,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.bsehead{display:flex;align-items:center;gap:24px;padding:0 32px;height:84px;background:#fff;position:sticky;top:0;z-index:8}
+.wordmark{display:flex;align-items:center;gap:12px;color:var(--ink);text-decoration:none;font-weight:700}
 .wordmark:hover{text-decoration:none}
-.logo-wrap{display:flex;align-items:center;flex:0 0 auto;line-height:0}
-.logo-wrap .logo{height:32px;width:auto;display:block}
-.logo-wrap .logo-on-light{display:none}
-html[data-theme=light] .logo-wrap .logo-on-dark{display:none}
-html[data-theme=light] .logo-wrap .logo-on-light{display:block}
-.wordmark .bname{font-size:12px;font-weight:600;color:var(--mut);letter-spacing:.01em;padding-left:12px;border-left:1px solid var(--line)}
+.logo-wrap{display:flex;align-items:center;line-height:0}
+.logo-wrap .logo{height:48px;width:auto;display:block}
+.logo-wrap .logo-on-dark{display:none}
+.logo-wrap .logo-on-light{display:block}
+.wordmark .bname{display:none}
 .bsehead .grow{flex:1}
-.bsehead .glink{color:var(--mut);font-size:13px;font-weight:600;white-space:nowrap}
-.tape{border-bottom:1px solid var(--line);overflow:hidden;background:var(--elev)}
-.track{display:flex;gap:8px;width:max-content;padding:8px 16px;animation:tick 40s linear infinite}
+.bsehead .glink{color:var(--mut);font-size:13px;font-weight:500;white-space:nowrap}
+.tape{padding:24px 32px 8px;background:#fff;overflow:hidden}
+.tick-row{display:flex;gap:16px;align-items:stretch;max-width:1240px;margin:0 auto}
+.tick-mkt{flex:none;width:140px;background:#000;color:#fff;font:600 1.05rem var(--sans);padding:0 20px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 6px 14px -6px rgba(0,0,0,.45)}
+.tick-mkt svg{width:14px;height:14px;fill:currentColor}
+.lane{flex:1;overflow:hidden;min-width:0;-webkit-mask-image:linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent);mask-image:linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent)}
+.track{display:flex;gap:16px;width:max-content;animation:tick 55s linear infinite}
 .tape:hover .track{animation-play-state:paused}
 @keyframes tick{to{transform:translateX(-50%)}}
 @media(prefers-reduced-motion:reduce){.track{animation:none;overflow-x:auto;width:auto;max-width:100%;scrollbar-width:none}}
-.chip{display:inline-flex;align-items:center;gap:8px;padding:6px 10px 6px 12px;border:1px solid var(--line);border-radius:999px;color:var(--txt);text-decoration:none;font-size:13px;background:var(--card);white-space:nowrap}
-.chip:hover{text-decoration:none;background:var(--hover)}
-.chip b{letter-spacing:.04em;font-size:12px}
-.chip .chg{font-weight:700;font-variant-numeric:tabular-nums}
+.chip{display:flex;align-items:center;border:1px solid var(--line);border-left:8px solid var(--accent);height:56px;white-space:nowrap;font-size:1rem;color:var(--ink);text-decoration:none;background:#fff;padding:0;gap:0}
+.chip:hover{text-decoration:none;background:var(--band)}
+.chip>span,.chip>b{padding:0 16px;border-right:1px solid var(--line);height:100%;display:flex;align-items:center;font-weight:500}
+.chip>span:last-child{border-right:0}
+.chip .nm{font-weight:500;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+.chip .u{color:var(--up)}.chip .d{color:var(--dn)}
 .up{color:var(--up)}.dn{color:var(--dn)}
-.spark{flex:0 0 auto;display:block;width:56px;height:20px}
-.wrap{display:grid;place-items:center;padding:40px 16px 48px;min-height:calc(100vh - 120px)}
-.card{width:min(440px,100%);border:1px solid var(--line);border-radius:var(--radius);padding:32px 28px 24px;background:var(--card);box-shadow:var(--shadow)}
-h1{margin:0 0 6px;font-size:26px;letter-spacing:-.03em;font-weight:800}
-.note{margin:0 0 22px;color:var(--mut);font-size:13px}
+.wrap{display:grid;place-items:center;padding:48px 16px 64px;min-height:calc(100vh - 160px);background:repeating-radial-gradient(circle at 72% 0,rgba(255,255,255,.13) 0 2px,transparent 2px 30px),radial-gradient(circle at 72% 0,#43b6e6 0,#1a7fb5 50%,#0a4a73 90%)}
+.card{width:min(440px,100%);border:2px solid #000;padding:36px 32px 28px;background:#fff}
+h1{margin:0 0 6px;font-size:2rem;letter-spacing:-.025em;font-weight:800;color:var(--ink)}
+.note{margin:0 0 22px;color:var(--mut);font-size:14px}
 label{display:block;margin:0 0 14px}
 label>span{display:block;font-size:12.5px;color:var(--mut);margin-bottom:6px;font-weight:600}
-input{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--field);color:var(--txt);font:inherit}
-input:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px rgba(59,130,246,.2)}
+input{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:0;background:#fff;color:var(--ink);font:inherit}
+input:focus{outline:0;border-color:#000;box-shadow:0 0 0 3px var(--accent)}
 .error{color:var(--dn);margin:0 0 14px;font-size:14px}
-button{width:100%;min-height:46px;border:0;border-radius:999px;background:var(--btn);color:var(--btntxt);font:inherit;font-weight:700;cursor:pointer;margin-top:4px}
-button:hover{filter:brightness(.94)}
+button{width:100%;min-height:48px;border:2px solid #000;border-radius:0;background:#000;color:#fff;font:600 1rem var(--sans);cursor:pointer;margin-top:4px}
+button:hover{background:#222}
 .links{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:16px 0 0;font-size:13px}
-.links a{color:var(--accent)}
+.links a{color:var(--deep)}
 .back{margin:12px 0 0;text-align:center;font-size:13px}
 .fine{margin:28px 0 0;text-align:center;color:var(--mut);font-size:12px}
 .fine a{color:inherit;text-decoration:underline}
-@media(max-width:600px){.wordmark .bname{display:none}.wordmark .logo-wrap .logo{height:26px}.wrap{padding:24px 12px 40px}.card{padding:24px 18px 20px}.bsehead{padding:0 14px;min-height:54px}}`;
+@media(max-width:700px){.tick-mkt{width:88px;padding:0 12px}.tape{padding:18px 16px 6px}.bsehead{padding:0 16px;height:64px}.logo-wrap .logo{height:36px}.wrap{padding:28px 12px 40px}.card{padding:28px 20px 22px}}`;
 
 async function loginPage(req: Request, opts: { next: string; error?: string; status?: number; challenge?: string; typed?: string; csrf?: string }): Promise<Response> {
 	const inst = settings().instance_name;
@@ -1051,12 +1062,11 @@ async function loginPage(req: Request, opts: { next: string; error?: string; sta
 		: `<label><span>Username or email</span><input name="username" value="${esc(opts.typed ?? "")}" autocomplete="username" autocapitalize="off" spellcheck="false" maxlength="320" required autofocus></label>
 <label><span>Password</span><input name="password" type="password" autocomplete="current-password" maxlength="1024" required></label>`;
 	const html = `<!DOCTYPE html>
-<html lang="en" data-site="bse"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<html lang="en" data-theme="light" data-site="bse"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${esc(title)}</title>
 ${BSE_ICONS}
-<meta name="theme-color" content="#000000">
+<meta name="theme-color" content="#ffffff">
 <meta name="description" content="Sign in to ${esc(BSE_NAME)} with your ${esc(inst)} account.">
-<script>(function(){var t="dark";try{if(matchMedia("(prefers-color-scheme: light)").matches)t="light"}catch(e){}document.documentElement.setAttribute("data-theme",t);var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content",t==="light"?"#ffffff":"#000000")})()</script>
 <style>${LOGIN_CSS}</style></head>
 <body>
 <header class="bsehead"><a class="wordmark" href="/" aria-label="${esc(BSE_SHORT)}">${BSE_WORDMARK}<span class="bname">${esc(BSE_NAME)}</span></a><div class="grow"></div><a class="glink" href="${esc(PUBLIC_ORIGIN)}">${esc(inst)}</a></header>
@@ -1178,7 +1188,7 @@ export async function bseSite(req: Request, opts: { ip: string }): Promise<Respo
 	if (!isBseHost(req)) return;
 	const url = new URL(req.url);
 	const p = url.pathname;
-	if (p === "/favicon.ico") return bsePublicFile("bse-favicon.png", "image/png");
+	if (p === "/favicon.ico") return bsePublicFile("bse-favicon.ico", "image/x-icon");
 	if (p === "/apple-touch-icon.png" || p === "/apple-touch-icon-precomposed.png") return bsePublicFile("bse-apple-touch.png", "image/png");
 	if (BSE_PASS.some((r) => r.test(p))) return;
 	const viewer = await getViewer(req);

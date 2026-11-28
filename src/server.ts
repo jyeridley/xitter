@@ -139,6 +139,11 @@ async function servePublic(p: string): Promise<Response> {
 			? new Response(svg, { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=86400", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'", "x-content-type-options": "nosniff" } })
 			: new Response("not found", { status: 404 });
 	}
+	if (/^fonts\/[\w.-]+\.woff2$/.test(name)) {
+		const font = Bun.file(`${PUBLIC_DIR}/${name}`);
+		if (!(await font.exists())) return new Response("not found", { status: 404 });
+		return new Response(font, { headers: { "content-type": "font/woff2", "cache-control": "public, max-age=31536000, immutable", "x-content-type-options": "nosniff" } });
+	}
 	if (!/^[\w.-]+\.(png|svg|ico|webp|webm|mp4)$/.test(name)) return new Response("not found", { status: 404 });
 	// a logo uploaded in the admin panel replaces the shipped one
 	const uploaded = brandingFile(name);
