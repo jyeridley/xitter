@@ -542,6 +542,25 @@ async function adminData() {
 // ---------- the page ----------
 
 let client: { js: string; css: string } | undefined;
+const BSE_PUBLIC = join(import.meta.dir, "..", "public");
+const BSE_LOGO_LIGHT = readFileSync(join(BSE_PUBLIC, "bse-logo-light.svg"), "utf8")
+	.replace(/<svg[^>]*>/, "")
+	.replace(/<\/svg>\s*$/, "")
+	.replace(/<title>[^<]*<\/title>/, "")
+	.trim();
+const BSE_ICONS = `<link rel="icon" type="image/svg+xml" href="/public/bse-favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/public/bse-favicon.png">
+<link rel="icon" type="image/png" sizes="48x48" href="/public/bse-favicon-48.png">
+<link rel="apple-touch-icon" href="/public/bse-apple-touch.png">`;
+const BSE_WORDMARK = `<span class="logo-wrap" aria-hidden="true"><img class="logo logo-on-dark" src="/public/bse-logo-light.svg" alt=""><img class="logo logo-on-light" src="/public/bse-logo.svg" alt=""></span>`;
+function bseLogoMark(x: number, y: number, height: number): string {
+	const scale = height / 723;
+	return `<g transform="translate(${x} ${y}) scale(${scale.toFixed(5)})">${BSE_LOGO_LIGHT}</g>`;
+}
+function bsePublicFile(name: string, type: string): Response {
+	return new Response(Bun.file(join(BSE_PUBLIC, name)), { headers: { "content-type": type, "cache-control": "public, max-age=86400", "x-content-type-options": "nosniff" } });
+}
+
 function clientFiles() {
 	if (!client || process.env.NODE_ENV !== "production") {
 		const src = readFileSync(join(import.meta.dir, "markets-client.js"), "utf8");
@@ -613,6 +632,7 @@ async function page(req: Request, viewer: Viewer | undefined, opts: { standalone
 <title>${esc(docTitle)}</title>
 <link rel="canonical" href="${esc(canonical)}">
 ${head}
+${standalone ? BSE_ICONS : ""}
 <meta name="theme-color" content="#000000">
 <style>${f.css}</style></head>
 <body><div id="app"></div>
@@ -699,7 +719,7 @@ function ogSvg(s: Shared, c: Company | undefined, pic: string | null = null, che
 	const pill = all.length ? `<rect x="56" y="${c ? 244 : 232}" width="170" height="44" rx="22" fill="${up ? "#1d3a2a" : "#3a1d1d"}"/><text x="141" y="${c ? 275 : 263}" font-size="24" font-weight="700" text-anchor="middle" fill="${up ? "#4ade80" : "#f87171"}">${up ? "▲" : "▼"} ${Math.abs(change).toFixed(2)}%</text>` : "";
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="${FONT}">
 <rect width="1200" height="630" fill="#000"/>
-<text x="56" y="70" font-size="26" font-weight="800" letter-spacing="4" fill="#e7e9ea">BSE</text>
+${bseLogoMark(56, 28, 34)}
 <text x="1144" y="70" font-size="22" fill="#71767b" text-anchor="end">${esc(BSE_NAME)}</text>
 ${face}<text x="${tx}" y="${c ? 128 : 132}" font-size="34" font-weight="700" fill="#e7e9ea">${head}</text>
 <text x="${tx}" y="${c ? 166 : 168}" font-size="24" fill="#71767b">${sub}</text>
@@ -811,7 +831,7 @@ function exportSvg(c: Company, range: number, label: string, pic: string | null,
 	const sy = cy + ch + 22, colW = (W - 96) / 4;
 	const row = `<rect x="48" y="${sy}" width="${W - 96}" height="76" rx="16" fill="#0e1012" stroke="#1f2327"/>`
 		+ stats.map(([k, v], i) => `<text x="${72 + i * colW}" y="${sy + 30}" font-size="16" fill="#71767b">${esc(k)}</text><text x="${72 + i * colW}" y="${sy + 58}" font-size="22" font-weight="700" fill="#e7e9ea">${esc(fitText(v, 22, colW - 30))}</text>`).join("");
-	const foot = `<text x="48" y="${H - 22}" font-size="17" font-weight="700" fill="#8b98a5">${esc(BSE_NAME)}</text>`
+	const foot = `${bseLogoMark(48, H - 38, 20)}`
 		+ `<text x="${W - 48}" y="${H - 22}" font-size="17" fill="#71767b" text-anchor="end">${esc(new URL(origin).host)}</text>`;
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="${W * S}" height="${H * S}" viewBox="0 0 ${W} ${H}" font-family="${FONT}">
 <rect width="${W}" height="${H}" fill="#000"/>
@@ -973,19 +993,20 @@ const LOGIN_CSS = `:root{--bg:#07090c;--elev:#0e1116;--card:#12151c;--line:rgba(
 html[data-theme=light]{--bg:#f3f5f8;--elev:#fff;--card:#fff;--line:#e6e8ee;--txt:#0c1222;--mut:#5c6573;--hover:rgba(15,20,25,.04);--accent:#2563eb;--btn:#0c1222;--btntxt:#fff;--field:#fff;--shadow:0 10px 30px rgba(15,23,42,.08);color-scheme:light}
 html[data-theme=light] .card,html[data-theme=light] .chip{border-color:var(--line)}
 html[data-theme=light] input{border-color:#d5d9e0}
-html[data-theme=light] .wordmark .mark{box-shadow:0 4px 10px rgba(37,99,235,.25)}
 *{box-sizing:border-box}
 html,body{margin:0;min-height:100%;background:var(--bg);color:var(--txt);font:15px/1.45 ui-sans-serif,"Segoe UI",system-ui,-apple-system,Inter,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .num{font-variant-numeric:tabular-nums}
 .bsehead{display:flex;align-items:center;gap:12px;padding:0 20px;min-height:60px;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:8;background:color-mix(in srgb,var(--bg) 86%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
-.wordmark{display:flex;align-items:center;gap:10px;color:var(--txt);text-decoration:none;font-weight:800}
+.wordmark{display:flex;align-items:center;gap:12px;color:var(--txt);text-decoration:none;font-weight:800}
 .wordmark:hover{text-decoration:none}
-.wordmark .mark{width:28px;height:28px;border-radius:8px;background:linear-gradient(180deg,#3b82f6,#2563eb);display:grid;place-items:center;box-shadow:0 4px 10px rgba(37,99,235,.35)}
-.wordmark .mark svg{width:16px;height:16px;display:block}
-.wordmark .bse{font-size:18px;letter-spacing:.14em}
-.wordmark .bname{font-size:12px;font-weight:600;color:var(--mut);letter-spacing:.01em;padding-left:10px;border-left:1px solid var(--line)}
+.logo-wrap{display:flex;align-items:center;flex:0 0 auto;line-height:0}
+.logo-wrap .logo{height:32px;width:auto;display:block}
+.logo-wrap .logo-on-light{display:none}
+html[data-theme=light] .logo-wrap .logo-on-dark{display:none}
+html[data-theme=light] .logo-wrap .logo-on-light{display:block}
+.wordmark .bname{font-size:12px;font-weight:600;color:var(--mut);letter-spacing:.01em;padding-left:12px;border-left:1px solid var(--line)}
 .bsehead .grow{flex:1}
 .bsehead .glink{color:var(--mut);font-size:13px;font-weight:600;white-space:nowrap}
 .tape{border-bottom:1px solid var(--line);overflow:hidden;background:var(--elev)}
@@ -1015,7 +1036,7 @@ button:hover{filter:brightness(.94)}
 .back{margin:12px 0 0;text-align:center;font-size:13px}
 .fine{margin:28px 0 0;text-align:center;color:var(--mut);font-size:12px}
 .fine a{color:inherit;text-decoration:underline}
-@media(max-width:600px){.wordmark .bname{display:none}.wrap{padding:24px 12px 40px}.card{padding:24px 18px 20px}.bsehead{padding:0 14px;min-height:54px}}`;
+@media(max-width:600px){.wordmark .bname{display:none}.wordmark .logo-wrap .logo{height:26px}.wrap{padding:24px 12px 40px}.card{padding:24px 18px 20px}.bsehead{padding:0 14px;min-height:54px}}`;
 
 async function loginPage(req: Request, opts: { next: string; error?: string; status?: number; challenge?: string; typed?: string; csrf?: string }): Promise<Response> {
 	const inst = settings().instance_name;
@@ -1032,13 +1053,13 @@ async function loginPage(req: Request, opts: { next: string; error?: string; sta
 	const html = `<!DOCTYPE html>
 <html lang="en" data-site="bse"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${esc(title)}</title>
-<link rel="icon" type="image/png" href="/public/favicon.png">
+${BSE_ICONS}
 <meta name="theme-color" content="#000000">
 <meta name="description" content="Sign in to ${esc(BSE_NAME)} with your ${esc(inst)} account.">
 <script>(function(){var t="dark";try{if(matchMedia("(prefers-color-scheme: light)").matches)t="light"}catch(e){}document.documentElement.setAttribute("data-theme",t);var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content",t==="light"?"#ffffff":"#000000")})()</script>
 <style>${LOGIN_CSS}</style></head>
 <body>
-<header class="bsehead"><a class="wordmark" href="/"><span class="mark" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none"><path d="M2 12 L6 7 L9 9.5 L14 3" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="14" cy="3" r="1.4" fill="#fff"/></svg></span><span class="bse">${esc(BSE_SHORT)}</span><span class="bname">${esc(BSE_NAME)}</span></a><div class="grow"></div><a class="glink" href="${esc(PUBLIC_ORIGIN)}">${esc(inst)}</a></header>
+<header class="bsehead"><a class="wordmark" href="/" aria-label="${esc(BSE_SHORT)}">${BSE_WORDMARK}<span class="bname">${esc(BSE_NAME)}</span></a><div class="grow"></div><a class="glink" href="${esc(PUBLIC_ORIGIN)}">${esc(inst)}</a></header>
 ${tape}
 <div class="wrap"><main class="card">
 <h1>${twoFactor ? "Enter your verification code" : `Sign in to ${esc(BSE_SHORT)}`}</h1>
@@ -1151,12 +1172,14 @@ function mapBsePage(pathname: string, q: URLSearchParams): { view?: string; tick
 	if (tk) return { ticker: tk, view: /\/edit\/?$/.test(pathname) ? "edit" : "co" };
 	return null;
 }
-const BSE_PASS = [/^\/abs\//, /^\/public\//, /^\/profile_images\//, /^\/media\//, /^\/i\/xitter\//, /^\/favicon\.ico$/, /^\/healthz$/, /^\/sw\.js$/];
+const BSE_PASS = [/^\/abs\//, /^\/public\//, /^\/profile_images\//, /^\/media\//, /^\/i\/xitter\//, /^\/healthz$/, /^\/sw\.js$/];
 // the BSE's own host: pretty paths, its own layout, and a way to sign in with a Bloxburg Social account
 export async function bseSite(req: Request, opts: { ip: string }): Promise<Response | undefined> {
 	if (!isBseHost(req)) return;
 	const url = new URL(req.url);
 	const p = url.pathname;
+	if (p === "/favicon.ico") return bsePublicFile("bse-favicon.png", "image/png");
+	if (p === "/apple-touch-icon.png" || p === "/apple-touch-icon-precomposed.png") return bsePublicFile("bse-apple-touch.png", "image/png");
 	if (BSE_PASS.some((r) => r.test(p))) return;
 	const viewer = await getViewer(req);
 	if (p === "/login") return bseLogin(req, viewer);

@@ -41,12 +41,18 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,te
 /* chrome */
 .bsehead{display:flex;align-items:center;gap:14px;padding:0 20px;min-height:60px;border-bottom:1px solid var(--line);
  position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 86%,transparent);-webkit-backdrop-filter:blur(16px) saturate(1.2);backdrop-filter:blur(16px) saturate(1.2)}
-.wordmark{display:flex;align-items:center;gap:10px;color:var(--txt);text-decoration:none;font-weight:750;flex:0 0 auto}
+.wordmark{display:flex;align-items:center;gap:12px;color:var(--txt);text-decoration:none;font-weight:750;flex:0 0 auto}
 .wordmark:hover{text-decoration:none}
-.wordmark .mark{width:28px;height:28px;border-radius:8px;background:linear-gradient(180deg,#3b82f6,#2563eb);display:grid;place-items:center;box-shadow:0 4px 10px rgba(37,99,235,.35)}
-.wordmark .mark svg{width:16px;height:16px;display:block}
-.wordmark .bse{font-size:18px;letter-spacing:.14em;font-weight:800}
-.wordmark .bname{font-size:12px;font-weight:600;color:var(--mut);letter-spacing:.01em;padding-left:10px;border-left:1px solid var(--line)}
+.logo-wrap{display:flex;align-items:center;flex:0 0 auto;line-height:0}
+.logo-wrap .logo{height:32px;width:auto;display:block}
+.logo-wrap .logo-on-light{display:none}
+html[data-theme=light] .logo-wrap .logo-on-dark{display:none}
+html[data-theme=light] .logo-wrap .logo-on-light{display:block}
+.wordmark .bname{font-size:12px;font-weight:600;color:var(--mut);letter-spacing:.01em;padding-left:12px;border-left:1px solid var(--line)}
+.bsefoot .brand{display:flex;align-items:center;margin:0 0 16px}
+.bsefoot .logo-wrap .logo{height:22px}
+.bar .inapp{margin-right:4px}
+.bar .logo-wrap .logo{height:24px}
 .hnav{display:flex;align-items:center;gap:2px;margin-left:8px}
 .hnav a{color:var(--mut);font-weight:600;font-size:13.5px;padding:8px 12px;border-radius:999px;text-decoration:none;transition:background .15s,color .15s}
 .hnav a:hover{background:var(--hover);color:var(--txt);text-decoration:none}
@@ -291,6 +297,7 @@ details.card summary{list-style:none;cursor:pointer;font-weight:800;font-size:17
  .tr.hold{grid-template-columns:minmax(0,2fr) 70px minmax(80px,1fr) minmax(80px,1fr) minmax(80px,1fr)}
  .hsearch{width:min(200px,22vw)}
  .wordmark .bname{display:none}
+ .wordmark .logo-wrap .logo{height:28px}
  .stats{grid-template-columns:repeat(3,1fr)}
 }
 @media(max-width:820px){
@@ -322,6 +329,7 @@ details.card summary{list-style:none;cursor:pointer;font-weight:800;font-size:17
  main{padding:14px 14px 28px}.big{font-size:28px}.spark{width:56px}.item{padding:12px}
  .cta{flex-direction:column;align-items:flex-start}
  .bsehead{padding:0 14px;min-height:54px}
+ .wordmark .logo-wrap .logo{height:26px}
 }
 /*---SCRIPT---*/
 (function(){
@@ -491,7 +499,9 @@ function sectorBar(){
  if(secs.length<2)return '';
  return '<div class=filters role=tablist aria-label="Sector">'+secs.map(function(s){return '<button type="button" class="'+(S.sector===s?'on':'')+'" data-sector="'+esc(s)+'">'+(s||'All')+'</button>'}).join('')+'</div>';
 }
-var MARK='<span class="mark" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none"><path d="M2 12 L6 7 L9 9.5 L14 3" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="14" cy="3" r="1.4" fill="#fff"/></svg></span>';
+function logoImgs(){
+ return '<span class="logo-wrap" aria-hidden="true"><img class="logo logo-on-dark" src="/public/bse-logo-light.svg" alt=""><img class="logo logo-on-light" src="/public/bse-logo.svg" alt=""></span>';
+}
 var SEARCH_ICO='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.25 3.75c-3.59 0-6.5 2.91-6.5 6.5s2.91 6.5 6.5 6.5c1.795 0 3.419-.726 4.596-1.904 1.178-1.177 1.904-2.801 1.904-4.596 0-3.59-2.91-6.5-6.5-6.5zm-8.5 6.5c0-4.694 3.806-8.5 8.5-8.5s8.5 3.806 8.5 8.5c0 1.986-.682 3.815-1.824 5.262l4.781 4.781-1.414 1.414-4.781-4.781c-1.447 1.142-3.276 1.824-5.262 1.824-4.694 0-8.5-3.806-8.5-8.5z"/></svg>';
 function tape(){
  if(SITE!=='bse'||!db.companies.length)return '';
@@ -516,7 +526,7 @@ function siteFoot(){
   +(db.me?'<a href="/portfolio" data-go="acct">Portfolio</a>':'<a href="'+esc(signInHref())+'">Sign in</a>')
   +(db.me&&db.me.canList?'<a href="/new" data-go="new">List a company</a>':'')
   +(HOME?'<a href="'+esc(HOME)+'">'+esc(db.instance||'Bloxburg Social')+'</a>':'');
- return '<footer class=bsefoot><div class=flinks>'+links+'</div>'+note+'</footer>';
+ return '<footer class=bsefoot><a class="wordmark brand" href="/" data-go="dash" aria-label="'+esc(BSE_SHORT)+'">'+logoImgs()+'</a><div class=flinks>'+links+'</div>'+note+'</footer>';
 }
 function dockNav(){
  if(SITE!=='bse')return '';
@@ -734,7 +744,7 @@ function siteHead(){
  var account=me
   ? '<a class=bal href="/portfolio" data-go="acct" title="Money balance">'+coin+'<span class=num>'+fmt(me.cash)+'</span></a><details class=acct><summary>'+(me.avatar?'<img src="'+esc(me.avatar)+'" alt="">':'')+'<span>@'+esc(me.handle)+'</span></summary><div class=acctm><a href="/portfolio" data-go="acct">Portfolio</a><div class=lbl>'+fmt(me.cash)+' Money available</div><a href="/logout">Log out</a></div></details>'
   : '<a class="small primary" href="'+esc(signInHref())+'">Sign in</a>';
- return '<header class=bsehead><a class=wordmark href="/" data-go="dash">'+MARK+'<span class=bse>'+esc(BSE_SHORT)+'</span><span class=bname>'+esc(BSE_NAME)+'</span></a><nav class=hnav aria-label="Primary">'+nav+'</nav><div class=grow></div>'
+ return '<header class=bsehead><a class=wordmark href="/" data-go="dash" aria-label="'+esc(BSE_SHORT)+'">'+logoImgs()+'<span class=bname>'+esc(BSE_NAME)+'</span></a><nav class=hnav aria-label="Primary">'+nav+'</nav><div class=grow></div>'
   +'<div class=hsearch>'+SEARCH_ICO+'<input id=qtop type=search placeholder="Search tickers" value="'+esc(S.qtop||'')+'" autocomplete=off aria-label="Search tickers"><div id=qsug role="listbox" aria-label="Matching companies"></div></div>'
   +account
   +(HOME?'<a class=glink href="'+esc(HOME)+'">'+esc(db.instance||'Bloxburg Social')+'</a>':'')+'</header>';
@@ -746,7 +756,9 @@ function render(){
  var sub=S.page==='co'&&co?esc(co.name):db.me&&db.me.cash!=null?coin+fmt(db.me.cash)+' in Money':BSE_NAME;
  var back=S.page==='co'||S.page==='new'||S.page==='edit'||(!framed&&SITE!=='bse');
  var hideBar=SITE==='bse'&&(S.page==='dash'||S.page==='list'||S.page==='acct'||S.page==='admin');
- var bar=hideBar?'':'<div class=bar>'+(back?'<button class=iconbtn data-back aria-label="Back">'+BACK+'</button>':'')+'<div class=grow><h1>'+esc(title)+'</h1><div class=sub>'+sub+'</div></div>'+(db.me&&db.me.canList&&S.page!=='new'&&S.page!=='edit'?'<button class="small primary" data-go="new" style="flex:0 0 auto">List a company</button>':'')+'</div>';
+ var inLogo=SITE!=='bse'?'<a class="wordmark inapp" href="'+pathOf('dash')+'" data-go="dash" aria-label="'+esc(BSE_SHORT)+'">'+logoImgs()+'</a>':'';
+ var heading=title===BSE_SHORT?'':'<h1>'+esc(title)+'</h1>';
+ var bar=hideBar?'':'<div class=bar>'+(back?'<button class=iconbtn data-back aria-label="Back">'+BACK+'</button>':'')+inLogo+'<div class=grow>'+heading+'<div class=sub>'+sub+'</div></div>'+(db.me&&db.me.canList&&S.page!=='new'&&S.page!=='edit'?'<button class="small primary" data-go="new" style="flex:0 0 auto">List a company</button>':'')+'</div>';
  var nav=hideBar||S.page==='new'||S.page==='edit'||SITE==='bse'?'':'<nav class=tabs>'+tabs().map(function(t){return '<a href="'+pathOf(t[0])+'" data-go="'+t[0]+'" class="'+(S.page===t[0]||(t[0]==='list'&&S.page==='co')?'on':'')+'">'+t[1]+'</a>'}).join('')+'</nav>';
  var body={dash:dash,list:list,co:coPage,acct:acct,admin:adminPage,new:function(){return companyForm(null)},edit:function(){return co?companyForm(co):coPage()}}[S.page]();
  var y=window.scrollY,old=$('.bar'),hid=!!(old&&old.hidden),f=document.activeElement&&document.activeElement.id,sel=f&&document.activeElement.selectionStart;
